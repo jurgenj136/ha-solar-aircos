@@ -38,7 +38,7 @@ version tags for public HACS releases.
   exported diagnostics.
 - Repository hygiene issues caused by generated cache and Finder files.
 
-## [Unreleased]
+## [1.0.1] - 2026-03-19
 
 ### Changed
 
@@ -49,3 +49,7 @@ version tags for public HACS releases.
 
 - Smart Airco sidepanel actions now use native panel integration instead of the
   brittle `/local` + `window.parent.hass` approach.
+
+## [Unreleased]
+
+- No unreleased changes yet.
