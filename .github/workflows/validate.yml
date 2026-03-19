@@ -28,4 +28,4 @@ jobs:
           python -m json.tool custom_components/smart_airco/manifest.json > /dev/null
 
       - name: Run Smart Airco tests
-        run: pytest tests/components/smart_airco -q
+        run: PYTHONPATH=. python -m pytest tests/components/smart_airco -q
