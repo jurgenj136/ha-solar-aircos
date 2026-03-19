@@ -86,8 +86,8 @@ def seed_states(hass) -> None:
 @pytest.fixture
 def panel_patches() -> Generator[None]:
     with (
-        patch("custom_components.smart_airco.async_register_built_in_panel"),
-        patch("custom_components.smart_airco.async_remove_panel"),
+        patch("custom_components.smart_airco.async_register_panel", AsyncMock()),
+        patch("custom_components.smart_airco.async_unregister_panel", AsyncMock()),
     ):
         yield
 

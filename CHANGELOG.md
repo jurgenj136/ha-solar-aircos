@@ -40,4 +40,12 @@ version tags for public HACS releases.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Changed
+
+- Replaced the experimental iframe sidebar with a native `panel_custom` Smart
+  Airco sidebar panel that uses Home Assistant's `hass` object directly.
+
+### Fixed
+
+- Smart Airco sidepanel actions now use native panel integration instead of the
+  brittle `/local` + `window.parent.hass` approach.

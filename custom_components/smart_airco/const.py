@@ -6,6 +6,15 @@ from datetime import timedelta
 
 DOMAIN = "smart_airco"
 
+# Panel constants
+PANEL_TITLE = "Smart Airco"
+PANEL_ICON = "mdi:air-conditioner"
+PANEL_NAME = "smart-airco-panel"
+PANEL_FRONTEND_URL_PATH = "smart-airco"
+PANEL_FOLDER = "frontend"
+PANEL_FILENAME = "smart-airco-panel.js"
+PANEL_URL = f"/api/panel_custom/{DOMAIN}"
+
 # Configuration keys - Global settings
 CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
 CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"

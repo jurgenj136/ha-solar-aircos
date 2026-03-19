@@ -26,14 +26,15 @@ Key files:
 - `sensor.py`
 - `services.yaml`
 - `translations/en.json`
-- `www/panel.html`
+- `panel.py`
+- `frontend/smart-airco-panel.js`
 
 ## Runtime model
 
 Smart Airco is a multi-AC orchestrator.
 
 - A minimal config flow creates the integration entry.
-- The sidebar panel is currently the main management surface.
+- A native Home Assistant custom sidebar panel is the main management surface.
 - Runtime services support evaluation, execution, and configuration changes.
 
 ## Support

@@ -4,17 +4,11 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from pathlib import Path
-import shutil
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.components.frontend import (
-    async_register_built_in_panel,
-    async_remove_panel,
-)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
@@ -39,6 +33,7 @@ from .const import (
     SERVICE_SET_GLOBAL_SETTINGS,
 )
 from .coordinator import SmartAircoCoordinator
+from .panel import async_register_panel, async_unregister_panel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,33 +41,6 @@ PLATFORMS: list[Platform] = [
     Platform.CLIMATE,
     Platform.SENSOR,
 ]
-
-
-def _copy_if_newer(src_panel: Path, dest_panel: Path) -> None:
-    """Copy panel.html to www if it is missing or older.
-
-    This function performs only blocking filesystem work and is intended
-    to be executed in the executor via hass.async_add_executor_job.
-    """
-    dest_panel.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if (not dest_panel.exists()) or (
-            src_panel.stat().st_mtime > dest_panel.stat().st_mtime
-        ):
-            shutil.copyfile(src_panel, dest_panel)
-    except Exception:
-        # Best-effort; caller will log a debug message
-        raise
-
-
-def _get_mtime_seconds(file_path: Path) -> int:
-    """Return the file modification time in whole seconds, or 0 if missing."""
-    try:
-        if file_path.exists():
-            return int(file_path.stat().st_mtime)
-    except Exception:
-        return 0
-    return 0
 
 
 # Service schemas
@@ -172,34 +140,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up all platforms for this config entry
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register sidebar panel (served from /local to avoid version-specific HTTP APIs)
-    try:
-        src_panel = Path(__file__).parent / "www" / "panel.html"
-        if register_panel and await hass.async_add_executor_job(src_panel.exists):
-            dest_panel = Path(hass.config.path("www")) / "smart_airco" / "panel.html"
-            try:
-                await hass.async_add_executor_job(_copy_if_newer, src_panel, dest_panel)
-            except Exception:
-                _LOGGER.debug(
-                    "Could not copy panel.html to /www; ensure it exists under /local/smart_airco/"
-                )
-
-            # Add sidebar item that opens our panel HTML via /local
-            cache_buster = await hass.async_add_executor_job(
-                _get_mtime_seconds, src_panel
-            )
-            panel_url = f"/local/smart_airco/panel.html?v={cache_buster}"
-            async_register_built_in_panel(
-                hass,
-                component_name="iframe",
-                sidebar_title="Smart Airco",
-                sidebar_icon="mdi:air-conditioner",
-                frontend_url_path="smart-airco",
-                config={"url": panel_url},
-                require_admin=True,
-            )
-    except Exception:  # pragma: no cover - panel registration best-effort
-        _LOGGER.exception("Failed to register Smart Airco sidebar panel")
+    # Register native custom panel once for the domain
+    if register_panel:
+        try:
+            await async_register_panel(hass)
+        except Exception:
+            _LOGGER.exception("Failed to register Smart Airco sidebar panel")
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+            hass.data[DOMAIN].pop(entry.entry_id, None)
+            return False
 
     # Register services
     await _async_register_services(hass)
@@ -223,7 +172,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Remove sidebar panel when no instances remain
         try:
-            async_remove_panel(hass, "smart-airco")
+            await async_unregister_panel(hass)
         except Exception:  # pragma: no cover
             _LOGGER.debug("Sidebar panel already removed or not present")
 

@@ -15,7 +15,7 @@ sensors.
 - Supports optional per-AC power sensors or estimated wattage.
 - Supports optional window and door sensors per AC.
 - Exposes a controller climate plus supporting sensors and services.
-- Uses a panel-first configuration flow for day-to-day setup and editing.
+- Uses a panel-first native Home Assistant sidebar for day-to-day setup and editing.
 - Includes basic anti-chatter behavior with startup hysteresis and minimum run
   and off times.
 
@@ -23,6 +23,9 @@ sensors.
 
 This integration currently uses a minimal config flow and a sidebar management
 panel.
+
+The sidebar is implemented as a native Home Assistant custom panel rather than
+an iframe served from `/local`.
 
 That means:
 
