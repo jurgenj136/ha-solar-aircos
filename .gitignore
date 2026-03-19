@@ -1,0 +1,7 @@
+*_plan.md
+*_spec.md
+automations
+*_cache/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,110 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Air Conditioning Controller",
+        "description": "Configure your smart airco system to automatically control air conditioning based on solar energy production.",
+        "data": {
+          "name": "Name",
+          "solar_forecast_sensor": "Solar Forecast Sensor",
+          "solar_production_sensor": "Current Solar Production Sensor",
+          "net_export_sensor": "Net Export to Grid Sensor",
+          "update_interval": "Update Interval (Minutes)"
+        },
+        "data_description": {
+          "solar_forecast_sensor": "Sensor that provides solar power forecast (e.g., Solcast)",
+          "solar_production_sensor": "Sensor showing current solar panel production",
+          "net_export_sensor": "Sensor showing power exported to the grid",
+          "update_interval": "How often to check sensors and update decisions"
+        }
+      },
+      "climate_list": {
+        "title": "Climate Entities",
+        "description": "Manage your air conditioning units. You currently have {climate_count} climate entities configured (max {max_climates}).",
+        "data": {
+          "action": "Action",
+          "climate_id": "Select Climate Entity"
+        },
+        "data_description": {
+          "action": "Choose what you want to do",
+          "climate_id": "Select a climate entity to edit or remove"
+        }
+      },
+      "climate_config": {
+        "title": "{editing} Climate Entity",
+        "description": "{editing} climate entity: {climate_name}",
+        "data": {
+          "entity_id": "Climate Entity",
+          "name": "Display Name",
+          "priority": "Priority (1 = highest)",
+          "use_estimated_power": "Use Estimated Power",
+          "wattage": "Estimated Power Consumption (Watts)",
+          "power_sensor": "Real-time Power Sensor (Optional)",
+          "window_sensors": "Window/Door Sensors (Optional)",
+          "enabled": "Enable Automatic Control"
+        },
+        "data_description": {
+          "entity_id": "The climate entity to control",
+          "name": "Friendly name for this AC unit",
+          "priority": "Lower numbers = higher priority when surplus is limited",
+          "use_estimated_power": "Use estimated wattage or real-time power sensor",
+          "wattage": "Estimated power consumption when no power sensor is available",
+          "power_sensor": "Sensor showing real-time power consumption of this AC unit",
+          "window_sensors": "AC won't run when any of these sensors are open",
+          "enabled": "Whether this AC should be controlled automatically"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Selected entity does not exist",
+      "entity_unavailable": "Selected entity is currently unavailable",
+      "not_climate_entity": "Selected entity is not a climate device",
+      "already_configured": "This climate entity is already configured",
+      "priority_already_used": "This priority number is already in use",
+      "window_sensor_not_found": "One or more window sensors do not exist",
+      "max_climate_entities_reached": "Maximum number of climate entities reached",
+      "no_climate_entities": "You must configure at least one climate entity",
+      "cannot_connect": "Failed to connect to the device",
+      "invalid_config": "Invalid configuration provided",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Smart Airco is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Airco Options",
+        "description": "Choose what you want to configure.",
+        "menu_options": {
+          "global_settings": "Global Settings",
+          "manage_climates": "Manage Climate Entities"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
+        "description": "Update global Smart Airco settings.",
+        "data": {
+          "solar_forecast_sensor": "Solar Forecast Sensor",
+          "solar_production_sensor": "Current Solar Production Sensor",
+          "net_export_sensor": "Net Export to Grid Sensor",
+          "update_interval": "Update Interval (Minutes)"
+        },
+        "data_description": {
+          "solar_forecast_sensor": "Sensor that provides solar power forecast",
+          "solar_production_sensor": "Sensor showing current solar production",
+          "net_export_sensor": "Sensor showing power exported to the grid",
+          "update_interval": "How often to check sensors and update decisions"
+        }
+      },
+      "manage_climates": {
+        "title": "Manage Climate Entities",
+        "description": "{info}",
+        "data": {},
+        "data_description": {}
+      }
+    }
+  }
+}
+

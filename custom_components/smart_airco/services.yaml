@@ -1,0 +1,198 @@
+evaluate_conditions:
+  name: Evaluate Conditions
+  description: Refresh sensor data and recalculate climate decisions
+
+force_update:
+  name: Force Update
+  description: Force an immediate update of all Smart Airco data
+
+execute_decisions:
+  name: Execute Decisions
+  description: Apply the current on or off decisions to the configured climate entities
+
+set_climate_priority:
+  name: Set Climate Priority
+  description: Change the priority of a configured climate entity
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: The managed climate entity to modify
+      required: true
+      selector:
+        entity:
+          domain: climate
+    priority:
+      name: Priority
+      description: New priority where 1 is highest
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+
+toggle_climate_entity:
+  name: Toggle Climate Entity
+  description: Enable or disable automatic control for a climate entity
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: The managed climate entity to toggle
+      required: true
+      selector:
+        entity:
+          domain: climate
+    enabled:
+      name: Enabled
+      description: Whether Smart Airco should control this climate automatically
+      required: true
+      selector:
+        boolean:
+
+set_climate_power:
+  name: Set Climate Power
+  description: Update the power configuration for one climate entity
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: The managed climate entity to update
+      required: true
+      selector:
+        entity:
+          domain: climate
+    use_estimated_power:
+      name: Use Estimated Power
+      description: Use the configured wattage instead of a live power sensor
+      selector:
+        boolean:
+    wattage:
+      name: Estimated Wattage
+      description: Estimated consumption used when live power is not used
+      selector:
+        number:
+          min: 100
+          max: 5000
+          step: 50
+          unit_of_measurement: W
+    power_sensor:
+      name: Power Sensor
+      description: Optional live power sensor for this climate entity
+      selector:
+        entity:
+          domain: sensor
+
+set_climate_windows:
+  name: Set Climate Windows
+  description: Update the window or door sensors that block one climate entity
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: The managed climate entity to update
+      required: true
+      selector:
+        entity:
+          domain: climate
+    window_sensors:
+      name: Window Sensors
+      description: Sensors that prevent the climate from running while open
+      required: true
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+add_climate:
+  name: Add Climate
+  description: Add a climate entity to Smart Airco management
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: Climate entity to add
+      required: true
+      selector:
+        entity:
+          domain: climate
+    name:
+      name: Display Name
+      description: Friendly display name used by Smart Airco
+      selector:
+        text:
+    priority:
+      name: Priority
+      description: Lower numbers run first when surplus is limited
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+    use_estimated_power:
+      name: Use Estimated Power
+      selector:
+        boolean:
+    wattage:
+      name: Estimated Wattage
+      selector:
+        number:
+          min: 100
+          max: 5000
+          step: 50
+          unit_of_measurement: W
+    power_sensor:
+      name: Power Sensor
+      selector:
+        entity:
+          domain: sensor
+    window_sensors:
+      name: Window Sensors
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    enabled:
+      name: Enabled
+      selector:
+        boolean:
+
+remove_climate:
+  name: Remove Climate
+  description: Remove a climate entity from Smart Airco management
+  fields:
+    entity_id:
+      name: Climate Entity
+      description: Climate entity to remove
+      required: true
+      selector:
+        entity:
+          domain: climate
+
+set_global_settings:
+  name: Set Global Settings
+  description: Update the global energy sensors and refresh interval
+  fields:
+    forecast_sensor:
+      name: Forecast Sensor
+      description: Sensor used for future solar production estimates
+      selector:
+        entity:
+          domain: sensor
+    production_sensor:
+      name: Production Sensor
+      description: Sensor used for current solar production
+      selector:
+        entity:
+          domain: sensor
+    net_export_sensor:
+      name: Net Export Sensor
+      description: Sensor used for current export to the grid
+      selector:
+        entity:
+          domain: sensor
+    update_interval_minutes:
+      name: Update Interval
+      description: Refresh interval in minutes
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: min

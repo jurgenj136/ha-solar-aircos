@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to Smart Airco should be documented in this file.
+
+The format is based on Keep a Changelog, and this project aims to use stable
+version tags for public HACS releases.
+
+## [1.0.0] - 2026-03-19
+
+### Added
+
+- HACS-ready repository files with root `README.md`, `hacs.json`, `LICENSE`,
+  brand assets, and validation workflow.
+- Manual override protection that disables automation for an AC when direct user
+  control is detected.
+- Diagnostics support for config entries.
+- Panel support for multi-instance selection, success and error notices, and
+  clearer status visibility.
+- Anti-chatter protections including startup hysteresis and minimum run and off
+  times.
+- Critical sensor validation and fail-safe behavior for missing, invalid, or
+  stale required inputs.
+
+### Changed
+
+- Public documentation now matches the actual panel-first setup flow.
+- Runtime status reporting now reflects actual HVAC state instead of only
+  desired decisions.
+- Controller enabled or disabled state now persists across reloads and restarts.
+- Panel climate rows are now backed by structured data keyed by entity ID rather
+  than name-derived keys.
+
+### Fixed
+
+- Multi-instance service and panel targeting so actions can be scoped to a
+  specific Smart Airco config entry.
+- Diagnostics redaction so configured entity IDs and names are not exposed in
+  exported diagnostics.
+- Repository hygiene issues caused by generated cache and Finder files.
+
+## [Unreleased]
+
+- No unreleased changes yet.
