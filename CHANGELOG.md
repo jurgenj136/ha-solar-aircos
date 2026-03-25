@@ -50,6 +50,26 @@ version tags for public HACS releases.
 - Smart Airco sidepanel actions now use native panel integration instead of the
   brittle `/local` + `window.parent.hass` approach.
 
+## [1.0.2] - 2026-03-19
+
+### Changed
+
+- Reworked the Smart Airco panel layout into clearer setup, status, actions,
+  add-climate, and managed-climate sections.
+- Replaced the cramped climate table editing flow with climate cards and a
+  focused single-climate editor.
+- Added clearer setup guidance for forecast, production, net export, and update
+  interval fields directly in the panel.
+
+### Fixed
+
+- Improved panel usability on both desktop and mobile by removing the tall,
+  overlapping inline edit layout.
+- Made climate state badges and decision text more readable so users can see
+  why a climate is blocked or idle without parsing internal reason strings.
+- Preserved frontend draft state more reliably while editing and fixed
+  multi-instance switching in the panel.
+
 ## [Unreleased]
 
 - No unreleased changes yet.
