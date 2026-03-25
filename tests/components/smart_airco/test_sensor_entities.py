@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from homeassistant.components.climate.const import HVACMode
+
+from custom_components.smart_airco.const import CONF_CONTROLLER_HVAC_MODE
 from custom_components.smart_airco.sensor import (
     SmartAircoClimatePowerSensor,
     SmartAircoClimateStatusSensor,
@@ -176,3 +179,27 @@ def test_climate_status_sensor_maps_reason_and_live_temperatures(
     assert attrs["current_temperature"] == 23.0
     assert attrs["target_temperature"] == 20.0
     assert attrs["decision_reason"] == "windows_open"
+
+
+def test_running_and_power_sensors_follow_heat_mode(hass, mock_config_entry) -> None:
+    heat_entry = mock_config_entry.__class__(
+        domain=mock_config_entry.domain,
+        title=mock_config_entry.title,
+        data={**mock_config_entry.data, CONF_CONTROLLER_HVAC_MODE: HVACMode.HEAT},
+    )
+    coordinator = _build_coordinator_with_data(hass, heat_entry)
+    coordinator.data["sensors"]["climate_entities"]["climate.living_room"]["state"] = (
+        "heat"
+    )
+
+    running = SmartAircoRunningCountSensor(coordinator, heat_entry)
+    total = SmartAircoTotalConsumptionSensor(coordinator, heat_entry)
+    living_cfg = heat_entry.data["climate_entities"][0]
+    power = SmartAircoClimatePowerSensor(coordinator, heat_entry, living_cfg)
+    status = SmartAircoClimateStatusSensor(coordinator, heat_entry, living_cfg)
+
+    assert running.native_value == 1
+    assert total.extra_state_attributes["running_count"] == 1
+    assert power.native_value == 950
+    assert power.extra_state_attributes["controller_hvac_mode"] == HVACMode.HEAT
+    assert status.native_value == "heating"

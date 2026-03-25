@@ -169,6 +169,23 @@ set_global_settings:
   name: Set Global Settings
   description: Update the global energy sensors and refresh interval
   fields:
+    controller_hvac_mode:
+      name: Controller HVAC Mode
+      description: Whether Smart Airco should run managed climates in cool or heat mode
+      selector:
+        select:
+          options:
+            - cool
+            - heat
+    controller_target_temperature:
+      name: Controller Target Temperature
+      description: Shared target temperature applied to climates controlled by Smart Airco
+      selector:
+        number:
+          min: 10
+          max: 35
+          step: 0.5
+          unit_of_measurement: °C
     forecast_sensor:
       name: Forecast Sensor
       description: Sensor used for future solar production estimates

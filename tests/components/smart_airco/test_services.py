@@ -6,7 +6,12 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.smart_airco import async_setup_entry, async_unload_entry
-from custom_components.smart_airco.const import CONF_CLIMATE_MANUAL_OVERRIDE, DOMAIN
+from custom_components.smart_airco.const import (
+    CONF_CLIMATE_MANUAL_OVERRIDE,
+    CONF_CONTROLLER_HVAC_MODE,
+    CONF_CONTROLLER_TARGET_TEMPERATURE,
+    DOMAIN,
+)
 from custom_components.smart_airco.coordinator import SmartAircoCoordinator
 
 
@@ -192,6 +197,8 @@ async def test_service_set_global_settings_updates_entry_data(
         DOMAIN,
         "set_global_settings",
         {
+            "controller_hvac_mode": "heat",
+            "controller_target_temperature": 22.5,
             "forecast_sensor": None,
             "production_sensor": "sensor.production_alt",
             "net_export_sensor": "sensor.net_export",
@@ -202,6 +209,8 @@ async def test_service_set_global_settings_updates_entry_data(
     await hass.async_block_till_done()
 
     assert setup_integration.data["solar_forecast_sensor"] is None
+    assert setup_integration.data[CONF_CONTROLLER_HVAC_MODE] == "heat"
+    assert setup_integration.data[CONF_CONTROLLER_TARGET_TEMPERATURE] == 22.5
     assert setup_integration.data["solar_production_sensor"] == "sensor.production_alt"
     assert setup_integration.data["update_interval"] == 900
 

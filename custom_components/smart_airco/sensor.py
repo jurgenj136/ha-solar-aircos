@@ -18,10 +18,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE, DOMAIN
 from .coordinator import SmartAircoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _controller_hvac_mode(coordinator: SmartAircoCoordinator) -> str:
+    """Return the configured Smart Airco run mode."""
+    return coordinator.config.get(
+        CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+    )
 
 
 async def async_setup_entry(
@@ -186,11 +193,12 @@ class SmartAircoTotalConsumptionSensor(SmartAircoBaseSensor):
 
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
+        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         # Count running ACs and their power
         running_acs = []
         for entity_id, climate_data in climate_entities.items():
-            if climate_data.get("state") == "cool":
+            if climate_data.get("state") == controller_hvac_mode:
                 running_acs.append(
                     {
                         "entity_id": entity_id,
@@ -225,9 +233,12 @@ class SmartAircoRunningCountSensor(SmartAircoBaseSensor):
 
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
+        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         return sum(
-            1 for climate in climate_entities.values() if climate.get("state") == "cool"
+            1
+            for climate in climate_entities.values()
+            if climate.get("state") == controller_hvac_mode
         )
 
     @property
@@ -319,9 +330,10 @@ class SmartAircoClimatePowerSensor(SmartAircoBaseSensor):
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
         climate_data = climate_entities.get(entity_id, {})
+        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         # Return actual power only if AC is running
-        if climate_data.get("state") == "cool":
+        if climate_data.get("state") == controller_hvac_mode:
             return climate_data.get("current_power", 0)
         return 0
 
@@ -340,10 +352,12 @@ class SmartAircoClimatePowerSensor(SmartAircoBaseSensor):
 
         decisions = self.coordinator.data.get("decisions", {})
         climate_decision = decisions.get("climate_decisions", {}).get(entity_id, {})
+        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         return {
             "entity_id": entity_id,
             "state": climate_data.get("state", "unknown"),
+            "controller_hvac_mode": controller_hvac_mode,
             "power_source": climate_data.get("power_source", "unknown"),
             "estimated_power": self.climate_config.get("wattage", 0),
             "priority": climate_data.get("priority", 999),
@@ -386,9 +400,10 @@ class SmartAircoClimateStatusSensor(SmartAircoBaseSensor):
         climate_data = climate_entities.get(entity_id, {})
         decisions = self.coordinator.data.get("decisions", {})
         climate_decision = decisions.get("climate_decisions", {}).get(entity_id, {})
+        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
-        if climate_data.get("state") == "cool":
-            return "cooling"
+        if climate_data.get("state") == controller_hvac_mode:
+            return "heating" if controller_hvac_mode == "heat" else "cooling"
         else:
             reason = climate_decision.get("reason", "unknown")
             if "windows_open" in reason:

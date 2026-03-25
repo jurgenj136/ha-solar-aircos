@@ -9,18 +9,23 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.climate.const import HVACMode
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
     CONF_CLIMATE_ENTITIES,
+    CONF_CONTROLLER_HVAC_MODE,
+    CONF_CONTROLLER_TARGET_TEMPERATURE,
     CONF_CONTROLLER_ENABLED,
     CONF_CLIMATE_ENTITY_ID,
     CONF_CLIMATE_ENABLED,
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_PRIORITY,
     DOMAIN,
+    DEFAULT_CONTROLLER_HVAC_MODE,
+    DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
     SERVICE_EVALUATE_CONDITIONS,
     SERVICE_EXECUTE_DECISIONS,
     SERVICE_FORCE_UPDATE,
@@ -112,6 +117,8 @@ SERVICE_REMOVE_CLIMATE_SCHEMA = vol.Schema(
 SERVICE_SET_GLOBAL_SETTINGS_SCHEMA = vol.Schema(
     {
         vol.Optional("config_entry_id"): cv.string,
+        vol.Optional("controller_hvac_mode"): vol.In([HVACMode.COOL, HVACMode.HEAT]),
+        vol.Optional("controller_target_temperature"): vol.All(vol.Coerce(float)),
         vol.Optional("forecast_sensor"): vol.Any(None, cv.entity_id),
         vol.Optional("production_sensor"): vol.Any(None, cv.entity_id),
         vol.Optional("net_export_sensor"): vol.Any(None, cv.entity_id),
@@ -483,6 +490,16 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         if "update_interval_minutes" in data:
             new_data["update_interval"] = data["update_interval_minutes"] * 60
         new_data.setdefault(CONF_CONTROLLER_ENABLED, True)
+        new_data.setdefault(CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE)
+        new_data.setdefault(
+            CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+        )
+        if "controller_hvac_mode" in data:
+            new_data[CONF_CONTROLLER_HVAC_MODE] = data["controller_hvac_mode"]
+        if "controller_target_temperature" in data:
+            new_data[CONF_CONTROLLER_TARGET_TEMPERATURE] = data[
+                "controller_target_temperature"
+            ]
         hass.config_entries.async_update_entry(coordinator.entry, data=new_data)
 
     # Register all services

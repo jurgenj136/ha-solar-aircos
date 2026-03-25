@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from homeassistant.components.climate.const import HVACMode
+
 DOMAIN = "smart_airco"
 
 # Panel constants
@@ -21,6 +23,8 @@ CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"
 CONF_NET_EXPORT_SENSOR = "net_export_sensor"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_CONTROLLER_ENABLED = "controller_enabled"
+CONF_CONTROLLER_HVAC_MODE = "controller_hvac_mode"
+CONF_CONTROLLER_TARGET_TEMPERATURE = "controller_target_temperature"
 
 # Configuration keys - Climate entities
 CONF_CLIMATE_ENTITIES = "climate_entities"
@@ -38,6 +42,8 @@ CONF_CLIMATE_MANUAL_OVERRIDE = "manual_override"
 DEFAULT_AIRCO_WATTAGE = 1000
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=5)
 DEFAULT_CLIMATE_NAME = "Air Conditioning"
+DEFAULT_CONTROLLER_HVAC_MODE = HVACMode.COOL
+DEFAULT_CONTROLLER_TARGET_TEMPERATURE = None
 
 # Service names
 SERVICE_EVALUATE_CONDITIONS = "evaluate_conditions"

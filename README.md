@@ -18,6 +18,10 @@ sensors.
 - Uses a panel-first native Home Assistant sidebar for day-to-day setup and editing.
 - Includes basic anti-chatter behavior with startup hysteresis and minimum run
   and off times.
+- Lets the Smart Airco Controller run managed climates in either `cool` or
+  `heat` mode.
+- Lets the Smart Airco Controller apply one shared target temperature to the
+  climates it is currently allowed to control.
 
 ## Current product shape
 
@@ -102,6 +106,8 @@ happens in the sidebar panel.
 
 Configure:
 
+- controller mode (`cool` or `heat`),
+- shared controller target temperature,
 - forecast sensor,
 - solar production sensor,
 - net export sensor,

@@ -31,9 +31,13 @@ from .const import (
     CONF_CLIMATE_USE_ESTIMATED_POWER,
     CONF_CLIMATE_WATTAGE,
     CONF_CLIMATE_WINDOW_SENSORS,
+    CONF_CONTROLLER_HVAC_MODE,
+    CONF_CONTROLLER_TARGET_TEMPERATURE,
     CONF_NET_EXPORT_SENSOR,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
+    DEFAULT_CONTROLLER_HVAC_MODE,
+    DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
 )
@@ -63,7 +67,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.entry = entry
-        self._pending_hvac_changes: dict[str, tuple[str, float, bool]] = {}
+        self._pending_hvac_changes: dict[str, dict[str, Any]] = {}
         self._recent_hvac_changes: dict[str, tuple[str, datetime]] = {}
 
         # Normalize update_interval (supports timedelta or seconds as int)
@@ -91,6 +95,24 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
     def climate_entities(self) -> list[dict[str, Any]]:
         """Get the configured climate entities."""
         return self.config.get(CONF_CLIMATE_ENTITIES, [])
+
+    @property
+    def controller_hvac_mode(self) -> str:
+        """Return the configured Smart Airco HVAC mode."""
+        return self.config.get(CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE)
+
+    @property
+    def controller_target_temperature(self) -> float | None:
+        """Return the configured Smart Airco target temperature."""
+        value = self.config.get(
+            CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+        )
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @callback
     def async_setup_manual_override_tracking(self):
@@ -121,7 +143,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
         if not entity_id or old_state is None or new_state is None:
             return
-        if self._consume_expected_hvac_change(entity_id, new_state.state):
+        if self._consume_expected_hvac_change(entity_id, new_state):
             return
         if not self._is_manual_override_change(old_state, new_state):
             return
@@ -163,23 +185,69 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         return False
 
     @callback
-    def _consume_expected_hvac_change(self, entity_id: str, new_state: str) -> bool:
+    def _consume_expected_hvac_change(self, entity_id: str, new_state: State) -> bool:
         """Return True if the state change matches a recent coordinator command."""
         pending = self._pending_hvac_changes.get(entity_id)
         if pending is None:
             return False
 
-        expected_state, expires_at, track_for_antichatter = pending
+        expires_at = pending.get("expires_at", 0.0)
         if monotonic() > expires_at:
             self._pending_hvac_changes.pop(entity_id, None)
             return False
-        if new_state != expected_state:
-            return False
 
-        self._pending_hvac_changes.pop(entity_id, None)
-        if track_for_antichatter:
-            self._recent_hvac_changes[entity_id] = (new_state, dt_util.utcnow())
-        return True
+        matched = False
+        expected_state = pending.get("expected_state")
+        if expected_state is not None and new_state.state == expected_state:
+            matched = True
+            pending.pop("expected_state", None)
+            if pending.get("track_for_antichatter", False):
+                self._recent_hvac_changes[entity_id] = (
+                    new_state.state,
+                    dt_util.utcnow(),
+                )
+
+        expected_temperature = pending.get("expected_temperature")
+        if expected_temperature is not None:
+            try:
+                current_temperature = float(new_state.attributes.get("temperature"))
+            except (TypeError, ValueError):
+                current_temperature = None
+
+            if (
+                current_temperature is not None
+                and abs(current_temperature - float(expected_temperature)) < 0.25
+            ):
+                matched = True
+                pending.pop("expected_temperature", None)
+
+        if (
+            not pending.get("expected_state")
+            and pending.get("expected_temperature") is None
+        ):
+            self._pending_hvac_changes.pop(entity_id, None)
+        else:
+            self._pending_hvac_changes[entity_id] = pending
+
+        return matched
+
+    def _remember_expected_climate_change(
+        self,
+        entity_id: str,
+        *,
+        expected_state: str | None = None,
+        expected_temperature: float | None = None,
+        track_for_antichatter: bool = True,
+    ) -> None:
+        """Track an expected coordinator-driven climate change."""
+        pending = self._pending_hvac_changes.get(entity_id, {})
+        if expected_state is not None:
+            pending["expected_state"] = expected_state
+        if expected_temperature is not None:
+            pending["expected_temperature"] = expected_temperature
+        pending["track_for_antichatter"] = track_for_antichatter
+        pending["expires_at"] = monotonic() + _EXPECTED_HVAC_CHANGE_TTL_SECONDS
+        self._pending_hvac_changes[entity_id] = pending
 
     async def async_disable_climate_automation_for_manual_override(
         self,
@@ -333,7 +401,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             climate_data["current_power"] = power_consumption
 
             # Only count power if AC is currently running (cooling)
-            if climate_data["state"] == "cool":
+            if climate_data["state"] == self.controller_hvac_mode:
                 total_airco_consumption += power_consumption
 
             # Check window sensors
@@ -570,6 +638,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             min_run_remaining = self._minimum_run_time_remaining(
                 current_state,
                 climate.get("recent_hvac_change"),
+                self.controller_hvac_mode,
             )
             if min_run_remaining is not None:
                 decisions["climate_decisions"][entity_id] = {
@@ -586,6 +655,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             min_off_remaining = self._minimum_off_time_remaining(
                 current_state,
                 climate.get("recent_hvac_change"),
+                self.controller_hvac_mode,
             )
             if min_off_remaining is not None:
                 decisions["climate_decisions"][entity_id] = {
@@ -596,7 +666,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 continue
 
             # Check if we have enough surplus for this AC
-            if current_state == "cool":
+            if current_state == self.controller_hvac_mode:
                 can_run = (
                     running_power + power_needed
                     <= predicted_surplus + _SURPLUS_HYSTERESIS_WATTS
@@ -665,13 +735,14 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         self,
         current_state: str,
         recent_hvac_change: tuple[str, datetime] | None,
+        controller_hvac_mode: str,
     ) -> int | None:
         """Return remaining minimum run time in seconds if cooling must continue."""
-        if current_state != "cool" or recent_hvac_change is None:
+        if current_state != controller_hvac_mode or recent_hvac_change is None:
             return None
 
         changed_state, changed_at = recent_hvac_change
-        if changed_state != "cool":
+        if changed_state != controller_hvac_mode:
             return None
 
         elapsed = dt_util.utcnow() - changed_at
@@ -683,9 +754,10 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         self,
         current_state: str,
         recent_hvac_change: tuple[str, datetime] | None,
+        controller_hvac_mode: str,
     ) -> int | None:
         """Return remaining minimum off time in seconds if startup must wait."""
-        if current_state == "cool" or recent_hvac_change is None:
+        if current_state == controller_hvac_mode or recent_hvac_change is None:
             return None
 
         changed_state, changed_at = recent_hvac_change
@@ -706,10 +778,10 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Set HVAC mode for a climate entity."""
         try:
-            self._pending_hvac_changes[entity_id] = (
-                hvac_mode,
-                monotonic() + _EXPECTED_HVAC_CHANGE_TTL_SECONDS,
-                track_for_antichatter,
+            self._remember_expected_climate_change(
+                entity_id,
+                expected_state=hvac_mode,
+                track_for_antichatter=track_for_antichatter,
             )
             await self.hass.services.async_call(
                 "climate",
@@ -722,6 +794,36 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             self._pending_hvac_changes.pop(entity_id, None)
             _LOGGER.error("Failed to set %s to %s: %s", entity_id, hvac_mode, err)
 
+    async def async_set_climate_temperature(
+        self, entity_id: str, temperature: float
+    ) -> None:
+        """Set target temperature for a climate entity."""
+        try:
+            self._remember_expected_climate_change(
+                entity_id,
+                expected_temperature=temperature,
+                track_for_antichatter=False,
+            )
+            await self.hass.services.async_call(
+                "climate",
+                "set_temperature",
+                {"entity_id": entity_id, "temperature": temperature},
+                blocking=True,
+            )
+            _LOGGER.info("Set %s target temperature to %s", entity_id, temperature)
+        except Exception as err:
+            pending = self._pending_hvac_changes.get(entity_id)
+            if pending is not None:
+                pending.pop("expected_temperature", None)
+                if not pending.get("expected_state"):
+                    self._pending_hvac_changes.pop(entity_id, None)
+            _LOGGER.error(
+                "Failed to set %s target temperature to %s: %s",
+                entity_id,
+                temperature,
+                err,
+            )
+
     async def async_execute_decisions(self) -> None:
         """Execute the airco decisions based on current data."""
         if not self.data:
@@ -732,6 +834,10 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         climate_decisions = decisions.get("climate_decisions", {})
         sensor_data = self.data.get("sensors", {})
         climate_entities = sensor_data.get("climate_entities", {})
+        controller_hvac_mode = self.config.get(
+            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+        )
+        controller_target_temperature = self.controller_target_temperature
 
         _LOGGER.info(
             "Executing decisions: %s (surplus: %dW, total needed: %dW)",
@@ -748,6 +854,15 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             current_state = climate_entities[entity_id]["state"]
             should_cool = climate_decision["should_cool"]
             climate_name = climate_entities[entity_id]["name"]
+            climate_state = self.hass.states.get(entity_id)
+            current_target_temperature = None
+            if climate_state is not None:
+                try:
+                    current_target_temperature = float(
+                        climate_state.attributes.get("temperature")
+                    )
+                except (TypeError, ValueError):
+                    current_target_temperature = None
 
             _LOGGER.debug(
                 "Climate %s (%s): should_cool=%s, current=%s, reason=%s",
@@ -759,14 +874,37 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             )
 
             # Execute state change if needed
-            if should_cool and current_state != "cool":
+            if should_cool and current_state != controller_hvac_mode:
                 _LOGGER.info(
-                    "Turning ON %s (%s) - %s",
+                    "Turning ON %s (%s) in %s mode - %s",
                     climate_name,
                     entity_id,
+                    controller_hvac_mode,
                     climate_decision.get("reason"),
                 )
-                await self.async_set_climate_mode(entity_id, "cool")
+                await self.async_set_climate_mode(entity_id, controller_hvac_mode)
+                if controller_target_temperature is not None:
+                    await self.async_set_climate_temperature(
+                        entity_id, controller_target_temperature
+                    )
+            elif (
+                should_cool
+                and controller_target_temperature is not None
+                and (
+                    current_target_temperature is None
+                    or abs(current_target_temperature - controller_target_temperature)
+                    >= 0.25
+                )
+            ):
+                _LOGGER.info(
+                    "Updating target temperature for %s (%s) to %s",
+                    climate_name,
+                    entity_id,
+                    controller_target_temperature,
+                )
+                await self.async_set_climate_temperature(
+                    entity_id, controller_target_temperature
+                )
             elif not should_cool and current_state not in ("off", "unknown"):
                 _LOGGER.info(
                     "Turning OFF %s (%s) - %s",

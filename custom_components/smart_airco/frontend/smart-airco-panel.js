@@ -128,6 +128,12 @@ class SmartAircoPanel extends HTMLElement {
     if (!this._globalDraft || entryChanged) {
       this._globalDraft = {
         entry_id: this._activeEntryId,
+        controller_hvac_mode: attrs.controller_hvac_mode || 'cool',
+        controller_target_temperature:
+          attrs.controller_target_temperature !== undefined &&
+          attrs.controller_target_temperature !== null
+            ? String(attrs.controller_target_temperature)
+            : '',
         forecast_sensor: attrs.forecast_sensor || '',
         production_sensor: attrs.production_sensor || '',
         net_export_sensor: attrs.net_export_sensor || '',
@@ -347,6 +353,14 @@ class SmartAircoPanel extends HTMLElement {
     return String(reason || 'unknown').replaceAll('_', ' ');
   }
 
+  _currentRunMode() {
+    return this._viewModel?.attrs?.controller_hvac_mode || 'cool';
+  }
+
+  _currentRunModeLabel() {
+    return this._currentRunMode() === 'heat' ? 'Heating' : 'Cooling';
+  }
+
   _formatDecisionReason(climate) {
     const reason = climate.reason || 'unknown';
 
@@ -364,17 +378,17 @@ class SmartAircoPanel extends HTMLElement {
     }
     if (reason.startsWith('minimum_run_time_remaining_')) {
       const seconds = reason.match(/minimum_run_time_remaining_(\d+)s/)?.[1] || '0';
-      return `Keeping this unit running for ${this._formatDuration(seconds)}`;
+      return `Keeping this unit ${this._currentRunModeLabel().toLowerCase()} for ${this._formatDuration(seconds)}`;
     }
     if (reason.startsWith('minimum_off_time_remaining_')) {
       const seconds = reason.match(/minimum_off_time_remaining_(\d+)s/)?.[1] || '0';
       return `Waiting ${this._formatDuration(seconds)} before restarting`;
     }
     if (reason.includes('running_with_hysteresis')) {
-      return 'Cooling remains allowed because surplus is still within the safety margin';
+      return `${this._currentRunModeLabel()} remains allowed because surplus is still within the safety margin`;
     }
     if (reason.includes('surplus_available_with_hysteresis')) {
-      return 'Enough predicted solar surplus is available for this climate';
+      return `Enough predicted solar surplus is available to start ${this._currentRunModeLabel().toLowerCase()} this climate`;
     }
     if (reason.startsWith('insufficient_surplus_')) {
       const need = reason.match(/need_(-?\d+)W/)?.[1];
@@ -512,6 +526,8 @@ class SmartAircoPanel extends HTMLElement {
 
   _renderSetupSection(attrs, sensorOptions, managedClimates) {
     const draft = this._globalDraft || {
+      controller_hvac_mode: 'cool',
+      controller_target_temperature: '',
       forecast_sensor: '',
       production_sensor: '',
       net_export_sensor: '',
@@ -531,6 +547,21 @@ class SmartAircoPanel extends HTMLElement {
         </div>
         ${this._renderSetupChecklist(attrs, managedClimates)}
         <div class="field-grid">
+          <div class="field-card">
+            <label for="sel-controller-mode">Controller mode</label>
+            <select id="sel-controller-mode" data-global-field="controller_hvac_mode">
+              <option value="cool" ${draft.controller_hvac_mode === 'cool' ? 'selected' : ''}>Cool</option>
+              <option value="heat" ${draft.controller_hvac_mode === 'heat' ? 'selected' : ''}>Heat</option>
+            </select>
+            <p class="field-help">Choose whether Smart Airco should run managed climates in cooling mode or heating mode when enough surplus is available.</p>
+          </div>
+          <div class="field-card">
+            <label for="inp-controller-temp">Controller target temperature</label>
+            <input id="inp-controller-temp" data-global-field="controller_target_temperature" type="number" min="10" max="35" step="0.5" value="${this._escape(
+              draft.controller_target_temperature || ''
+            )}" />
+            <p class="field-help">Shared target temperature applied to all climates that are currently enabled for Smart Airco control when they run.</p>
+          </div>
           <div class="field-card">
             <label for="sel-forecast">Forecast sensor</label>
             <select id="sel-forecast" data-global-field="forecast_sensor">${this._selectOptions(
@@ -590,6 +621,12 @@ class SmartAircoPanel extends HTMLElement {
           <div class="metric-card"><span class="metric-label">Controller</span><strong>${this._escape(
             attrs.controller_enabled ? 'Enabled' : 'Disabled'
           )}</strong></div>
+          <div class="metric-card"><span class="metric-label">Run mode</span><strong>${this._escape(
+            attrs.controller_hvac_mode || 'cool'
+          )}</strong></div>
+          <div class="metric-card"><span class="metric-label">Shared target</span><strong>${this._escape(
+            attrs.controller_target_temperature ?? 'Not set'
+          )}${attrs.controller_target_temperature !== undefined && attrs.controller_target_temperature !== null ? ' °C' : ''}</strong></div>
           <div class="metric-card"><span class="metric-label">Predicted surplus</span><strong>${this._escape(
             attrs.predicted_surplus || 0
           )} W</strong></div>
@@ -608,7 +645,9 @@ class SmartAircoPanel extends HTMLElement {
         </div>
         <div class="status-band">
           <span class="status-label">Current summary</span>
-          <strong>${this._escape(this._rawReasonToText(attrs.decision_reason || 'unknown'))}</strong>
+          <strong>${this._escape(this._currentRunModeLabel())} strategy: ${this._rawReasonToText(
+            attrs.decision_reason || 'unknown'
+          )}</strong>
         </div>
         ${
           criticalErrors.length
@@ -767,7 +806,7 @@ class SmartAircoPanel extends HTMLElement {
                 climate.priority
               )}</strong></div>
               <div><span class="meta-label">Automation</span><strong>${this._escape(
-                climate.enabled ? 'Enabled' : 'Disabled'
+                climate.enabled ? 'Controlled by Smart Airco' : 'Ignored by Smart Airco'
               )}</strong></div>
               <div><span class="meta-label">Windows</span><strong>${this._escape(
                 climate.windows_open ? 'Open / blocking' : windowsLabel
@@ -795,8 +834,8 @@ class SmartAircoPanel extends HTMLElement {
                 this._isPending(`toggle:${climate.entity_id}`)
                   ? 'Saving...'
                   : draft.enabled
-                  ? 'Automation enabled'
-                  : 'Automation disabled'
+                  ? 'Smart Airco may control this climate'
+                  : 'Smart Airco will ignore this climate'
               }</span>
             </label>
             <button
@@ -1332,6 +1371,7 @@ class SmartAircoPanel extends HTMLElement {
             <span class="tag ${attrs.controller_enabled ? 'ok' : 'neutral'}">${this._escape(
               attrs.controller_enabled ? 'Controller enabled' : 'Controller disabled'
             )}</span>
+            <span class="tag neutral">${this._escape(this._currentRunModeLabel())} mode</span>
           </div>
         </section>
         ${this._renderNotice()}
@@ -1438,17 +1478,25 @@ class SmartAircoPanel extends HTMLElement {
 
     if (action === 'save-global') {
       const draft = this._globalDraft || {};
-      const updateIntervalMinutes = Number.parseInt(draft.update_interval_minutes || '5', 10);
-      await this._runPanelAction('save-global', async () => {
-        await this._callSmartAircoService('set_global_settings', {
-          forecast_sensor: draft.forecast_sensor || null,
-          production_sensor: draft.production_sensor || null,
-          net_export_sensor: draft.net_export_sensor || null,
-          update_interval_minutes: Number.isFinite(updateIntervalMinutes)
-            ? updateIntervalMinutes
-            : 5,
-        });
-      }, 'Setup saved.');
+        const updateIntervalMinutes = Number.parseInt(draft.update_interval_minutes || '5', 10);
+        const controllerTargetTemperature = Number.parseFloat(
+          draft.controller_target_temperature || ''
+        );
+        await this._runPanelAction('save-global', async () => {
+          const payload = {
+            controller_hvac_mode: draft.controller_hvac_mode || 'cool',
+            forecast_sensor: draft.forecast_sensor || null,
+            production_sensor: draft.production_sensor || null,
+            net_export_sensor: draft.net_export_sensor || null,
+            update_interval_minutes: Number.isFinite(updateIntervalMinutes)
+              ? updateIntervalMinutes
+              : 5,
+          };
+          if (Number.isFinite(controllerTargetTemperature)) {
+            payload.controller_target_temperature = controllerTargetTemperature;
+          }
+          await this._callSmartAircoService('set_global_settings', payload);
+        }, 'Setup saved.');
       return;
     }
 

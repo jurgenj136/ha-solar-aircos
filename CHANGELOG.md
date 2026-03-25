@@ -70,6 +70,29 @@ version tags for public HACS releases.
 - Preserved frontend draft state more reliably while editing and fixed
   multi-instance switching in the panel.
 
+## [1.0.3] - 2026-03-25
+
+### Added
+
+- Shared controller target temperature support so the Smart Airco Controller can
+  apply one setpoint to climates it is allowed to control.
+- Controller-wide `heat` and `cool` strategy selection for managed climates.
+
+### Changed
+
+- Reused the existing per-climate `enabled` toggle as the controller's
+  selection gate for which climates Smart Airco may control.
+- Updated the panel setup and status UI to show controller mode and shared
+  target temperature more clearly.
+
+### Fixed
+
+- Coordinator-driven temperature changes no longer falsely trigger manual
+  override handling.
+- Running-count, power, and status sensors now respect the controller's active
+  HVAC mode.
+- Added `.gitignore` coverage for generated checklist files.
+
 ## [Unreleased]
 
 - No unreleased changes yet.

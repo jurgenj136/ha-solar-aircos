@@ -9,6 +9,8 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.smart_airco.const import (
     CONF_CLIMATE_MANUAL_OVERRIDE,
+    CONF_CONTROLLER_HVAC_MODE,
+    CONF_CONTROLLER_TARGET_TEMPERATURE,
     DOMAIN,
 )
 from custom_components.smart_airco.coordinator import SmartAircoCoordinator
@@ -232,6 +234,11 @@ async def test_hysteresis_blocks_marginal_startup(
 async def test_execute_decisions_only_calls_state_changes_when_needed(
     hass, mock_config_entry, seed_states
 ) -> None:
+    mock_config_entry = mock_config_entry.__class__(
+        domain=mock_config_entry.domain,
+        title=mock_config_entry.title,
+        data={**mock_config_entry.data, CONF_CONTROLLER_TARGET_TEMPERATURE: 21.0},
+    )
     coordinator = SmartAircoCoordinator(hass, mock_config_entry)
     coordinator.data = {
         "decisions": {
@@ -251,14 +258,80 @@ async def test_execute_decisions_only_calls_state_changes_when_needed(
         },
     }
 
+    with (
+        patch.object(
+            coordinator, "async_set_climate_mode", AsyncMock()
+        ) as mock_set_mode,
+        patch.object(
+            coordinator, "async_set_climate_temperature", AsyncMock()
+        ) as mock_set_temp,
+    ):
+        await coordinator.async_execute_decisions()
+
+    mock_set_mode.assert_any_await("climate.living_room", "cool")
+    mock_set_mode.assert_any_await("climate.bedroom", "off")
+    mock_set_temp.assert_awaited_once_with("climate.living_room", 21.0)
+
+
+@pytest.mark.asyncio
+async def test_execute_decisions_uses_controller_heat_mode(
+    hass, mock_config_entry, seed_states
+) -> None:
+    heat_entry = mock_config_entry.__class__(
+        domain=mock_config_entry.domain,
+        title=mock_config_entry.title,
+        data={**mock_config_entry.data, CONF_CONTROLLER_HVAC_MODE: "heat"},
+    )
+    coordinator = SmartAircoCoordinator(hass, heat_entry)
+    coordinator.data = {
+        "decisions": {
+            "reason": "running_1_units",
+            "available_surplus": 1500,
+            "total_power_needed": 950,
+            "climate_decisions": {
+                "climate.living_room": {"should_cool": True, "reason": "priority_1"},
+            },
+        },
+        "sensors": {
+            "climate_entities": {
+                "climate.living_room": {"state": "off", "name": "Living Room"},
+            }
+        },
+    }
+
     with patch.object(
         coordinator, "async_set_climate_mode", AsyncMock()
     ) as mock_set_mode:
         await coordinator.async_execute_decisions()
 
-    mock_set_mode.assert_any_await("climate.living_room", "cool")
-    mock_set_mode.assert_any_await("climate.bedroom", "off")
-    assert mock_set_mode.await_count == 2
+    mock_set_mode.assert_awaited_once_with("climate.living_room", "heat")
+
+
+@pytest.mark.asyncio
+async def test_expected_coordinator_temperature_change_does_not_trigger_manual_override(
+    hass, setup_integration
+) -> None:
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+    coordinator._remember_expected_climate_change(
+        "climate.bedroom",
+        expected_temperature=21.0,
+        track_for_antichatter=False,
+    )
+
+    hass.states.async_set(
+        "climate.bedroom",
+        "off",
+        {"current_temperature": 23.0, "temperature": 21.0},
+    )
+    await hass.async_block_till_done()
+
+    bedroom = next(
+        c
+        for c in setup_integration.data["climate_entities"]
+        if c["entity_id"] == "climate.bedroom"
+    )
+    assert bedroom["enabled"] is True
+    assert bedroom.get(CONF_CLIMATE_MANUAL_OVERRIDE, False) is False
 
 
 def test_update_interval_accepts_seconds_and_timedelta(hass, mock_config_entry) -> None:
@@ -341,11 +414,12 @@ async def test_expected_coordinator_state_change_does_not_trigger_manual_overrid
     hass, setup_integration
 ) -> None:
     coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
-    coordinator._pending_hvac_changes["climate.bedroom"] = (
-        "cool",
-        monotonic() + 30,
-        True,
-    )
+    coordinator._pending_hvac_changes["climate.bedroom"] = {
+        "expected_state": "cool",
+        "expires_at": monotonic() + 30,
+        "track_for_antichatter": True,
+        "expected_temperature": None,
+    }
 
     hass.states.async_set(
         "climate.bedroom",

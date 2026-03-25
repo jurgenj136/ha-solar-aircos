@@ -21,7 +21,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_CONTROLLER_ENABLED,
+    CONF_CONTROLLER_HVAC_MODE,
+    CONF_CONTROLLER_TARGET_TEMPERATURE,
     DOMAIN,
+    DEFAULT_CONTROLLER_HVAC_MODE,
+    DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
     ENTITY_SMART_CONTROLLER,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
@@ -62,11 +66,16 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
 
         # Climate entity configuration
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
-        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.AUTO]
+        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL, HVACMode.HEAT]
         self._attr_supported_features = (
-            ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+            ClimateEntityFeature.TURN_ON
+            | ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.TARGET_TEMPERATURE
         )
-        self._attr_hvac_mode = HVACMode.AUTO
+        self._attr_target_temperature_step = 0.5
+        self._controller_mode = config_entry.data.get(
+            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+        )
         self._enabled = config_entry.data.get(CONF_CONTROLLER_ENABLED, True)
 
     @property
@@ -77,7 +86,7 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode."""
-        return HVACMode.AUTO if self._enabled else HVACMode.OFF
+        return self._controller_mode if self._enabled else HVACMode.OFF
 
     @property
     def hvac_action(self) -> str | None:
@@ -92,11 +101,17 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
         climate_entities = sensor_data.get("climate_entities", {})
 
         running_count = sum(
-            1 for climate in climate_entities.values() if climate.get("state") == "cool"
+            1
+            for climate in climate_entities.values()
+            if climate.get("state") == self._controller_mode
         )
 
         if running_count > 0:
-            return HVACAction.COOLING
+            return (
+                HVACAction.HEATING
+                if self._controller_mode == HVACMode.HEAT
+                else HVACAction.COOLING
+            )
         return HVACAction.IDLE
 
     @property
@@ -105,11 +120,8 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
         if not self.coordinator.data:
             return None
 
-        sensor_data = self.coordinator.data.get("sensors", {})
-        climate_entities = sensor_data.get("climate_entities", {})
-
         temperatures = []
-        for entity_id, climate_data in climate_entities.items():
+        for entity_id in self._controller_selected_entity_ids():
             # Get temperature from the actual climate entity
             climate_state = self.coordinator.hass.states.get(entity_id)
             if climate_state and climate_state.attributes.get("current_temperature"):
@@ -124,14 +136,17 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
     @property
     def target_temperature(self) -> float | None:
         """Return target temperature (average of all climate entities)."""
-        if not self.coordinator.data:
-            return None
-
-        sensor_data = self.coordinator.data.get("sensors", {})
-        climate_entities = sensor_data.get("climate_entities", {})
+        configured_target = self.config_entry.data.get(
+            CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+        )
+        if configured_target is not None:
+            try:
+                return float(configured_target)
+            except (TypeError, ValueError):
+                return None
 
         temperatures = []
-        for entity_id, climate_data in climate_entities.items():
+        for entity_id in self._controller_selected_entity_ids():
             # Get target temperature from the actual climate entity
             climate_state = self.coordinator.hass.states.get(entity_id)
             if climate_state and climate_state.attributes.get("temperature"):
@@ -142,6 +157,34 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
                     continue
 
         return sum(temperatures) / len(temperatures) if temperatures else None
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum supported controller temperature."""
+        min_values = []
+        for entity_id in self._controller_selected_entity_ids():
+            climate_state = self.coordinator.hass.states.get(entity_id)
+            if climate_state is None:
+                continue
+            try:
+                min_values.append(float(climate_state.attributes.get("min_temp", 16.0)))
+            except (TypeError, ValueError):
+                continue
+        return min(min_values) if min_values else 10.0
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum supported controller temperature."""
+        max_values = []
+        for entity_id in self._controller_selected_entity_ids():
+            climate_state = self.coordinator.hass.states.get(entity_id)
+            if climate_state is None:
+                continue
+            try:
+                max_values.append(float(climate_state.attributes.get("max_temp", 35.0)))
+            except (TypeError, ValueError):
+                continue
+        return max(max_values) if max_values else 35.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -168,7 +211,9 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
             1 for c in climate_entities.values() if c.get("manual_override", False)
         )
         running_count = sum(
-            1 for climate in climate_entities.values() if climate.get("state") == "cool"
+            1
+            for climate in climate_entities.values()
+            if climate.get("state") == self._controller_mode
         )
         available_count = sum(
             1 for c in climate_entities.values() if c.get("can_run", False)
@@ -179,6 +224,8 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
             "smart_airco_entry_id": self.config_entry.entry_id,
             # System status
             "controller_enabled": self._enabled,
+            "controller_hvac_mode": self._controller_mode,
+            "controller_target_temperature": self.target_temperature,
             "total_climate_entities": len(climate_entities),
             "enabled_entities": enabled_count,
             "manual_override_entities": manual_override_count,
@@ -266,22 +313,48 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
 
         return attributes
 
+    def _controller_selected_entity_ids(self) -> list[str]:
+        """Return climate entity IDs selected for controller management."""
+        climate_entities = self.coordinator.config.get("climate_entities", [])
+        selected_entity_ids = [
+            config.get("entity_id")
+            for config in climate_entities
+            if config.get("enabled", True) and isinstance(config.get("entity_id"), str)
+        ]
+        if selected_entity_ids:
+            return selected_entity_ids
+
+        return [
+            config.get("entity_id")
+            for config in climate_entities
+            if isinstance(config.get("entity_id"), str)
+        ]
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set HVAC mode."""
-        if hvac_mode == HVACMode.AUTO:
+        if hvac_mode in (HVACMode.COOL, HVACMode.HEAT):
             self._enabled = True
+            self._controller_mode = hvac_mode
             self.coordinator.hass.config_entries.async_update_entry(
                 self.config_entry,
-                data={**self.config_entry.data, CONF_CONTROLLER_ENABLED: True},
+                data={
+                    **self.config_entry.data,
+                    CONF_CONTROLLER_ENABLED: True,
+                    CONF_CONTROLLER_HVAC_MODE: hvac_mode,
+                },
             )
-            _LOGGER.info("Smart Airco Controller enabled")
+            _LOGGER.info("Smart Airco Controller enabled in %s mode", hvac_mode)
             # Trigger immediate evaluation
             await self.coordinator.async_request_refresh()
         elif hvac_mode == HVACMode.OFF:
             self._enabled = False
             self.coordinator.hass.config_entries.async_update_entry(
                 self.config_entry,
-                data={**self.config_entry.data, CONF_CONTROLLER_ENABLED: False},
+                data={
+                    **self.config_entry.data,
+                    CONF_CONTROLLER_ENABLED: False,
+                    CONF_CONTROLLER_HVAC_MODE: self._controller_mode,
+                },
             )
             _LOGGER.info("Smart Airco Controller disabled")
             # Turn off all managed ACs
@@ -289,9 +362,41 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
 
         self.async_write_ha_state()
 
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set the shared controller target temperature."""
+        if ATTR_TEMPERATURE not in kwargs:
+            return
+
+        try:
+            temperature = float(kwargs[ATTR_TEMPERATURE])
+        except (TypeError, ValueError):
+            return
+
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={
+                **self.config_entry.data,
+                CONF_CONTROLLER_ENABLED: self._enabled,
+                CONF_CONTROLLER_HVAC_MODE: self._controller_mode,
+                CONF_CONTROLLER_TARGET_TEMPERATURE: temperature,
+            },
+        )
+
+        if self.coordinator.data:
+            sensor_data = self.coordinator.data.get("sensors", {})
+            climate_entities = sensor_data.get("climate_entities", {})
+            for entity_id in self._controller_selected_entity_ids():
+                climate_data = climate_entities.get(entity_id, {})
+                if climate_data.get("state") == self._controller_mode:
+                    await self.coordinator.async_set_climate_temperature(
+                        entity_id, temperature
+                    )
+
+        self.async_write_ha_state()
+
     async def async_turn_on(self) -> None:
         """Turn on the Smart Airco controller."""
-        await self.async_set_hvac_mode(HVACMode.AUTO)
+        await self.async_set_hvac_mode(self._controller_mode)
 
     async def async_turn_off(self) -> None:
         """Turn off the Smart Airco controller."""
@@ -329,6 +434,10 @@ class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
         Note: Coordinator listeners are synchronous callbacks. Schedule any
         async work on the Home Assistant loop instead of awaiting here.
         """
+        self._controller_mode = self.config_entry.data.get(
+            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+        )
+
         if self._enabled and self.coordinator.data:
             # Schedule execution of decisions without blocking the callback
             self.coordinator.hass.async_create_task(
