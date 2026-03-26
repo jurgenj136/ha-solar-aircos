@@ -116,6 +116,15 @@ version tags for public HACS releases.
   temperature per managed climate.
 - The panel no longer depends on the removed shared controller entity.
 
+## [1.0.5] - 2026-03-26
+
+### Fixed
+
+- Fixed a Smart Airco panel render regression where the frontend still called
+  the removed `_getControllers()` helper after the panel-anchor refactor.
+- Restored panel loading so the Smart Airco sidebar opens correctly again after
+  the per-managed-climate entity release.
+
 ## [Unreleased]
 
 - No unreleased changes yet.

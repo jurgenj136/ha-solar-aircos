@@ -989,7 +989,7 @@ class SmartAircoPanel extends HTMLElement {
       criticalErrors,
       states,
     } = this._viewModel;
-    const controllers = this._getControllers(states);
+    const controllers = this._getPanelAnchors(states);
 
     this.shadowRoot.innerHTML = `
       <style>
