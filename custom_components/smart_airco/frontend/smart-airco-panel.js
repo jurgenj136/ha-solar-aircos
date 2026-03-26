@@ -602,7 +602,7 @@ class SmartAircoPanel extends HTMLElement {
     `;
   }
 
-  _renderStatusSection(attrs, criticalErrors) {
+  _renderStatusSection(controller, attrs, criticalErrors) {
     const lastUpdate = attrs.last_update ? new Date(attrs.last_update) : null;
     const lastUpdateText = lastUpdate && !Number.isNaN(lastUpdate.getTime())
       ? lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -1407,7 +1407,7 @@ class SmartAircoPanel extends HTMLElement {
         ${this._renderNotice()}
         ${this._renderInstancePicker(controllers)}
         ${this._renderSetupSection(attrs, sensorOptions, managedClimates)}
-        ${this._renderStatusSection(attrs, criticalErrors)}
+        ${this._renderStatusSection(controller, attrs, criticalErrors)}
         ${this._renderActionsSection()}
         ${this._renderAddClimateSection(availableClimateOptions, powerOptions)}
         ${this._renderClimateList(managedClimates, powerOptions, windowOptions)}

@@ -125,6 +125,15 @@ version tags for public HACS releases.
 - Restored panel loading so the Smart Airco sidebar opens correctly again after
   the per-managed-climate entity release.
 
+## [1.0.6] - 2026-03-26
+
+### Fixed
+
+- Fixed another Smart Airco panel render regression where the status section
+  referenced `controller` without receiving it as an argument.
+- Restored panel rendering after the `1.0.5` hotfix so the Smart Airco sidebar
+  loads cleanly again.
+
 ## [Unreleased]
 
 - No unreleased changes yet.
