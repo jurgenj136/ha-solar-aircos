@@ -134,6 +134,23 @@ version tags for public HACS releases.
 - Restored panel rendering after the `1.0.5` hotfix so the Smart Airco sidebar
   loads cleanly again.
 
+## [1.0.7] - 2026-03-26
+
+### Changed
+
+- Smart Airco managed climate entities now use `preset_mode` values of `off`,
+  `on`, and `solar_based` instead of the earlier active/inactive model.
+- The panel and runtime model now align around per-climate Smart Airco
+  operating modes, per-climate heat/cool selection, and per-climate target
+  temperatures.
+
+### Fixed
+
+- Manual climate changes now update the matching Smart Airco preset and copy the
+  manually chosen mode and temperature instead of only disabling automation.
+- `preset_mode = on` now force-runs a climate and intentionally ignores solar
+  surplus and window/door blocking, matching the intended behavior.
+
 ## [Unreleased]
 
 - No unreleased changes yet.

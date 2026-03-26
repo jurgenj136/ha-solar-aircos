@@ -26,6 +26,7 @@ from .const import (
     CONF_CLIMATE_HVAC_MODE,
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_NAME,
+    CONF_CLIMATE_PRESET_MODE,
     CONF_CLIMATE_PRIORITY,
     CONF_CLIMATE_TARGET_TEMPERATURE,
     CONF_CLIMATE_WATTAGE,
@@ -33,10 +34,12 @@ from .const import (
     CONF_CLIMATE_USE_ESTIMATED_POWER,
     CONF_CLIMATE_WINDOW_SENSORS,
     DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_PRESET_MODE,
     DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DOMAIN,
-    PRESET_ACTIVE,
-    PRESET_INACTIVE,
+    PRESET_OFF,
+    PRESET_ON,
+    PRESET_SOLAR_BASED,
 )
 from .coordinator import SmartAircoCoordinator
 
@@ -80,8 +83,8 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
         self._attr_name = f"{base_name} Smart Airco"
         self._attr_unique_id = f"{config_entry.entry_id}_{self._source_entity_id.replace('.', '_')}_smart_airco"
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
-        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL, HVACMode.HEAT]
-        self._attr_preset_modes = [PRESET_ACTIVE, PRESET_INACTIVE]
+        self._attr_hvac_modes = [HVACMode.COOL, HVACMode.HEAT]
+        self._attr_preset_modes = [PRESET_OFF, PRESET_ON, PRESET_SOLAR_BASED]
         self._attr_supported_features = (
             ClimateEntityFeature.TURN_ON
             | ClimateEntityFeature.TURN_OFF
@@ -110,18 +113,24 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     def _desired_hvac_mode(self) -> str:
         return self._config().get(CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE)
 
+    def _preset_mode(self) -> str:
+        value = self._config().get(
+            CONF_CLIMATE_PRESET_MODE, DEFAULT_CLIMATE_PRESET_MODE
+        )
+        return value if isinstance(value, str) else DEFAULT_CLIMATE_PRESET_MODE
+
     def _active(self) -> bool:
-        return self._config().get(CONF_CLIMATE_ENABLED, True)
+        return self._preset_mode() != PRESET_OFF
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return desired Smart Airco HVAC mode for this climate."""
-        return self._desired_hvac_mode() if self._active() else HVACMode.OFF
+        return self._desired_hvac_mode()
 
     @property
     def preset_mode(self) -> str | None:
         """Return Smart Airco participation state."""
-        return PRESET_ACTIVE if self._active() else PRESET_INACTIVE
+        return self._preset_mode()
 
     @property
     def hvac_action(self) -> str | None:
@@ -132,6 +141,8 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
         runtime = self._runtime()
         current_state = runtime.get("state")
         desired_mode = self._desired_hvac_mode()
+        if self._preset_mode() == PRESET_OFF:
+            return HVACAction.OFF
         if current_state == desired_mode:
             return (
                 HVACAction.HEATING
@@ -211,6 +222,7 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
             "smart_airco_entry_id": self.config_entry.entry_id,
             "source_entity_id": self._source_entity_id,
             "smart_airco_active": self._active(),
+            "smart_airco_preset_mode": self._preset_mode(),
             "smart_airco_hvac_mode": self._desired_hvac_mode(),
             "smart_airco_target_temperature": self.target_temperature,
             "priority": config.get(CONF_CLIMATE_PRIORITY, 999),
@@ -247,33 +259,53 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set Smart Airco desired HVAC mode for this climate."""
         if hvac_mode == HVACMode.OFF:
-            await self.async_set_preset_mode(PRESET_INACTIVE)
+            await self.async_set_preset_mode(PRESET_OFF)
             return
 
         if hvac_mode not in (HVACMode.COOL, HVACMode.HEAT):
             return
 
-        await self._async_update_config(
-            **{CONF_CLIMATE_ENABLED: True, CONF_CLIMATE_HVAC_MODE: hvac_mode}
-        )
+        await self._async_update_config(**{CONF_CLIMATE_HVAC_MODE: hvac_mode})
+        if self._preset_mode() == PRESET_ON:
+            await self.coordinator.async_set_climate_mode(
+                self._source_entity_id, hvac_mode
+            )
+            if self.target_temperature is not None:
+                await self.coordinator.async_set_climate_temperature(
+                    self._source_entity_id, self.target_temperature
+                )
         await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set Smart Airco participation state for this climate."""
-        if preset_mode not in (PRESET_ACTIVE, PRESET_INACTIVE):
+        if preset_mode not in (PRESET_OFF, PRESET_ON, PRESET_SOLAR_BASED):
             return
 
-        enabled = preset_mode == PRESET_ACTIVE
+        enabled = preset_mode != PRESET_OFF
         await self._async_update_config(
-            **{CONF_CLIMATE_ENABLED: enabled, CONF_CLIMATE_MANUAL_OVERRIDE: False}
+            **{
+                CONF_CLIMATE_ENABLED: enabled,
+                CONF_CLIMATE_PRESET_MODE: preset_mode,
+                CONF_CLIMATE_MANUAL_OVERRIDE: False,
+            }
         )
-        if not enabled:
+        if preset_mode == PRESET_OFF:
             await self.coordinator.async_set_climate_mode(
                 self._source_entity_id,
                 HVACMode.OFF,
                 track_for_antichatter=False,
             )
+        elif preset_mode == PRESET_ON:
+            await self.coordinator.async_set_climate_mode(
+                self._source_entity_id,
+                self._desired_hvac_mode(),
+                track_for_antichatter=False,
+            )
+            if self.target_temperature is not None:
+                await self.coordinator.async_set_climate_temperature(
+                    self._source_entity_id, self.target_temperature
+                )
         await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 
@@ -290,7 +322,10 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
             **{CONF_CLIMATE_TARGET_TEMPERATURE: temperature}
         )
         runtime = self._runtime()
-        if self._active() and runtime.get("state") == self._desired_hvac_mode():
+        if self._preset_mode() == PRESET_ON or (
+            self._preset_mode() == PRESET_SOLAR_BASED
+            and runtime.get("state") == self._desired_hvac_mode()
+        ):
             await self.coordinator.async_set_climate_temperature(
                 self._source_entity_id, temperature
             )
@@ -299,8 +334,8 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
 
     async def async_turn_on(self) -> None:
         """Turn on Smart Airco participation for this climate."""
-        await self.async_set_preset_mode(PRESET_ACTIVE)
+        await self.async_set_preset_mode(PRESET_ON)
 
     async def async_turn_off(self) -> None:
         """Turn off Smart Airco participation for this climate."""
-        await self.async_set_preset_mode(PRESET_INACTIVE)
+        await self.async_set_preset_mode(PRESET_OFF)

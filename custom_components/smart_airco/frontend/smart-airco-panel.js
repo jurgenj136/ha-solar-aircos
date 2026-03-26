@@ -211,6 +211,7 @@ class SmartAircoPanel extends HTMLElement {
       entity_id: climate.entity_id,
       priority: String(climate.priority ?? 1),
       enabled: Boolean(climate.enabled),
+      smart_airco_preset_mode: climate.smart_airco_preset_mode || 'solar_based',
       smart_airco_hvac_mode: climate.smart_airco_hvac_mode || 'cool',
       smart_airco_target_temperature:
         climate.smart_airco_target_temperature !== undefined &&
@@ -380,8 +381,11 @@ class SmartAircoPanel extends HTMLElement {
     if (climate.manual_override || reason === 'manual_override') {
       return 'Manual override is active';
     }
-    if (!climate.enabled || reason === 'disabled') {
-      return 'Automation is turned off for this climate';
+    if (climate.smart_airco_preset_mode === 'off' || reason === 'off') {
+      return 'Smart Airco keeps this climate turned off';
+    }
+    if (climate.smart_airco_preset_mode === 'on' || reason === 'on') {
+      return 'Smart Airco forces this climate on and ignores solar and window blocking';
     }
     if (climate.windows_open || reason === 'windows_open') {
       return 'Blocked because a configured window or door is open';
@@ -422,8 +426,11 @@ class SmartAircoPanel extends HTMLElement {
     if (climate.manual_override) {
       return { label: 'Manual override', tone: 'warn' };
     }
-    if (!climate.enabled) {
-      return { label: 'Automation off', tone: 'neutral' };
+    if (climate.smart_airco_preset_mode === 'off') {
+      return { label: 'Off', tone: 'neutral' };
+    }
+    if (climate.smart_airco_preset_mode === 'on') {
+      return { label: 'Forced on', tone: 'ok' };
     }
     if (climate.windows_open) {
       return { label: 'Window open', tone: 'warn' };
@@ -795,7 +802,7 @@ class SmartAircoPanel extends HTMLElement {
                 climate.priority
               )}</strong></div>
               <div><span class="meta-label">Automation</span><strong>${this._escape(
-                climate.enabled ? 'Controlled by Smart Airco' : 'Ignored by Smart Airco'
+                climate.smart_airco_preset_mode || 'solar_based'
               )}</strong></div>
               <div><span class="meta-label">Smart Airco mode</span><strong>${this._escape(
                 climate.smart_airco_hvac_mode || 'cool'
@@ -817,22 +824,6 @@ class SmartAircoPanel extends HTMLElement {
             </div>
           </div>
           <div class="climate-actions">
-            <label class="toggle-pill">
-              <input
-                type="checkbox"
-                data-action="toggle-climate"
-                data-climate-id="${this._escape(climate.entity_id)}"
-                ${draft.enabled ? 'checked' : ''}
-                ${this._isPending(`toggle:${climate.entity_id}`) ? 'disabled' : ''}
-              />
-              <span>${
-                this._isPending(`toggle:${climate.entity_id}`)
-                  ? 'Saving...'
-                  : draft.enabled
-                  ? 'Smart Airco may control this climate'
-                  : 'Smart Airco will ignore this climate'
-              }</span>
-            </label>
             <button
               data-action="toggle-editor"
               data-climate-id="${this._escape(climate.entity_id)}"
@@ -851,16 +842,18 @@ class SmartAircoPanel extends HTMLElement {
       <div class="editor-panel">
         <div class="editor-grid">
           <section class="editor-section">
-            <h4>Automation</h4>
-            <label class="checkbox-line">
-              <input
-                data-climate-field="enabled"
-                data-climate-id="${this._escape(climate.entity_id)}"
-                type="checkbox"
-                ${draft.enabled ? 'checked' : ''}
-              />
-              Smart Airco may control this climate
-            </label>
+            <h4>Smart Airco behavior</h4>
+            <label for="preset-mode-${this._escape(climate.entity_id)}">Operating mode</label>
+            <select
+              id="preset-mode-${this._escape(climate.entity_id)}"
+              data-climate-field="smart_airco_preset_mode"
+              data-climate-id="${this._escape(climate.entity_id)}"
+            >
+              <option value="off" ${draft.smart_airco_preset_mode === 'off' ? 'selected' : ''}>Off</option>
+              <option value="on" ${draft.smart_airco_preset_mode === 'on' ? 'selected' : ''}>On</option>
+              <option value="solar_based" ${draft.smart_airco_preset_mode === 'solar_based' ? 'selected' : ''}>Solar based</option>
+            </select>
+            <p class="field-help">Off keeps the climate off. On forces it on and ignores solar and window blocking. Solar based follows normal Smart Airco rules.</p>
             <label for="hvac-mode-${this._escape(climate.entity_id)}">Smart Airco mode</label>
             <select
               id="hvac-mode-${this._escape(climate.entity_id)}"
@@ -1562,24 +1555,6 @@ class SmartAircoPanel extends HTMLElement {
       return;
     }
 
-    if (action === 'toggle-climate') {
-      const smartEntityId = this._viewModel.smartAircoClimateEntityMap[climateId];
-      if (!smartEntityId) {
-        this._setNotice('Smart Airco climate entity not found for this climate.', 'error');
-        return;
-      }
-      const nextEnabled = button instanceof HTMLInputElement ? button.checked : Boolean(draft.enabled);
-      draft.enabled = nextEnabled;
-      await this._runPanelAction(`toggle:${climateId}`, async () => {
-        await this._hass.callService('climate', 'set_preset_mode', {
-          entity_id: smartEntityId,
-          preset_mode: nextEnabled ? 'active' : 'inactive',
-        });
-        this._scheduleFollowUpRenders();
-      }, nextEnabled ? 'Smart Airco control enabled for this climate.' : 'Smart Airco control disabled for this climate.');
-      return;
-    }
-
     if (action === 'save-smart-airco') {
       const smartEntityId = button.getAttribute('data-smart-airco-entity-id') || this._viewModel.smartAircoClimateEntityMap[climateId];
       if (!smartEntityId) {
@@ -1590,13 +1565,13 @@ class SmartAircoPanel extends HTMLElement {
       await this._runPanelAction(`smart-airco:${climateId}`, async () => {
         await this._hass.callService('climate', 'set_preset_mode', {
           entity_id: smartEntityId,
-          preset_mode: draft.enabled ? 'active' : 'inactive',
+          preset_mode: draft.smart_airco_preset_mode || 'solar_based',
         });
         await this._hass.callService('climate', 'set_hvac_mode', {
           entity_id: smartEntityId,
-          hvac_mode: draft.enabled ? draft.smart_airco_hvac_mode || 'cool' : 'off',
+          hvac_mode: draft.smart_airco_hvac_mode || 'cool',
         });
-        if (draft.enabled && Number.isFinite(targetTemperature)) {
+        if (Number.isFinite(targetTemperature)) {
           await this._hass.callService('climate', 'set_temperature', {
             entity_id: smartEntityId,
             temperature: targetTemperature,

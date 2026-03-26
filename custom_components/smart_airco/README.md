@@ -35,6 +35,10 @@ Smart Airco is a multi-AC orchestrator.
 
 - A minimal config flow creates the integration entry.
 - A native Home Assistant custom sidebar panel is the main management surface.
+- Each managed climate gets its own Smart Airco climate entity with:
+  - `hvac_mode` (`heat` / `cool`)
+  - `target_temperature`
+  - `preset_mode` (`off` / `on` / `solar_based`)
 - Runtime services support evaluation, execution, and configuration changes.
 
 ## Support

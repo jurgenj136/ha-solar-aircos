@@ -33,7 +33,7 @@ set_climate_priority:
 
 toggle_climate_entity:
   name: Toggle Climate Entity
-  description: Enable or disable automatic control for a climate entity
+  description: Legacy helper to switch a managed climate between Smart Airco `solar_based` and `off`
   fields:
     entity_id:
       name: Climate Entity
@@ -44,7 +44,7 @@ toggle_climate_entity:
           domain: climate
     enabled:
       name: Enabled
-      description: Whether Smart Airco should control this climate automatically
+      description: True maps to `solar_based`, false maps to `off`
       required: true
       selector:
         boolean:
@@ -167,11 +167,11 @@ remove_climate:
 
 set_global_settings:
   name: Set Global Settings
-  description: Update the global energy sensors and refresh interval
+  description: Update global energy sensors, refresh interval, and optional bulk defaults for all managed climates
   fields:
     controller_hvac_mode:
       name: Controller HVAC Mode
-      description: Whether Smart Airco should run managed climates in cool or heat mode
+      description: Optional bulk update for all managed climates to set their Smart Airco heat/cool mode
       selector:
         select:
           options:
@@ -179,7 +179,7 @@ set_global_settings:
             - heat
     controller_target_temperature:
       name: Controller Target Temperature
-      description: Shared target temperature applied to climates controlled by Smart Airco
+      description: Optional bulk update for all managed climates to set their Smart Airco target temperature
       selector:
         number:
           min: 10

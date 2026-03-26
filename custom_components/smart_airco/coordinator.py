@@ -9,6 +9,7 @@ from time import monotonic
 from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.climate.const import HVACMode
 from homeassistant.core import (
     Event,
     EventStateChangedData,
@@ -28,6 +29,7 @@ from .const import (
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_NAME,
     CONF_CLIMATE_POWER_SENSOR,
+    CONF_CLIMATE_PRESET_MODE,
     CONF_CLIMATE_PRIORITY,
     CONF_CLIMATE_TARGET_TEMPERATURE,
     CONF_CLIMATE_USE_ESTIMATED_POWER,
@@ -37,9 +39,13 @@ from .const import (
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
     DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_PRESET_MODE,
     DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    PRESET_OFF,
+    PRESET_ON,
+    PRESET_SOLAR_BASED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,6 +121,13 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError):
             return None
 
+    def climate_preset_mode(self, climate_config: Mapping[str, Any]) -> str:
+        """Return the configured Smart Airco preset mode for one climate."""
+        value = climate_config.get(
+            CONF_CLIMATE_PRESET_MODE, DEFAULT_CLIMATE_PRESET_MODE
+        )
+        return value if isinstance(value, str) else DEFAULT_CLIMATE_PRESET_MODE
+
     @callback
     def async_setup_manual_override_tracking(self):
         """Track state changes on managed climates to detect manual overrides."""
@@ -158,10 +171,6 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             None,
         )
         if climate_config is None:
-            return
-        if climate_config.get(CONF_CLIMATE_MANUAL_OVERRIDE):
-            return
-        if not climate_config.get(CONF_CLIMATE_ENABLED, True):
             return
 
         self.hass.async_create_task(
@@ -256,18 +265,35 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         previous_state: str,
         new_state: str,
     ) -> None:
-        """Persist a manual override state for a managed climate entity."""
+        """Translate a manual climate change into Smart Airco state."""
         climate_entities = []
         changed = False
+        current_state = self.hass.states.get(entity_id)
+        target_temperature = None
+        if current_state is not None:
+            try:
+                value = current_state.attributes.get("temperature")
+                target_temperature = None if value is None else float(value)
+            except (TypeError, ValueError):
+                target_temperature = None
 
         for climate_config in self.climate_entities:
             updated_config = dict(climate_config)
             if updated_config.get(CONF_CLIMATE_ENTITY_ID) == entity_id:
-                if not updated_config.get(
-                    CONF_CLIMATE_MANUAL_OVERRIDE
-                ) or updated_config.get(CONF_CLIMATE_ENABLED, True):
+                if new_state == HVACMode.OFF:
+                    updated_config[CONF_CLIMATE_PRESET_MODE] = PRESET_OFF
                     updated_config[CONF_CLIMATE_ENABLED] = False
-                    updated_config[CONF_CLIMATE_MANUAL_OVERRIDE] = True
+                else:
+                    updated_config[CONF_CLIMATE_PRESET_MODE] = PRESET_ON
+                    updated_config[CONF_CLIMATE_ENABLED] = True
+                    if new_state in (HVACMode.COOL, HVACMode.HEAT):
+                        updated_config[CONF_CLIMATE_HVAC_MODE] = new_state
+                    if target_temperature is not None:
+                        updated_config[CONF_CLIMATE_TARGET_TEMPERATURE] = (
+                            target_temperature
+                        )
+                updated_config[CONF_CLIMATE_MANUAL_OVERRIDE] = True
+                if updated_config != climate_config:
                     changed = True
             climate_entities.append(updated_config)
 
@@ -275,7 +301,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             return
 
         _LOGGER.info(
-            "Manual override detected for %s (%s -> %s); disabling automation for that AC",
+            "Manual override detected for %s (%s -> %s); syncing Smart Airco preset state",
             entity_id,
             previous_state,
             new_state,
@@ -350,6 +376,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 "manual_override": climate_config.get(
                     CONF_CLIMATE_MANUAL_OVERRIDE, False
                 ),
+                "preset_mode": self.climate_preset_mode(climate_config),
                 "priority": climate_config.get(CONF_CLIMATE_PRIORITY, 999),
                 "name": climate_config.get(CONF_CLIMATE_NAME, entity_id),
                 "desired_hvac_mode": self.climate_hvac_mode(climate_config),
@@ -414,8 +441,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             )
             climate_data["windows_open"] = windows_open
             climate_data["can_run"] = (
-                climate_data["enabled"]
-                and not climate_data["manual_override"]
+                climate_data["preset_mode"] == PRESET_SOLAR_BASED
                 and not windows_open
                 and climate_data["available"]
             )
@@ -578,64 +604,93 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         predicted_surplus = calculations.get("predicted_surplus", 0)
         climate_entities = sensor_data.get("climate_entities", {})
 
-        if sensor_data.get("critical_input_errors"):
-            return {
-                "climate_decisions": {
-                    entity_id: {
-                        "should_cool": False,
-                        "reason": "critical_inputs_invalid",
-                        "power": climate_data.get("current_power", 0),
-                    }
-                    for entity_id, climate_data in climate_entities.items()
-                },
-                "total_power_needed": 0,
-                "reason": "critical_inputs_invalid",
-                "available_surplus": 0,
-                "critical_input_errors": sensor_data.get("critical_input_errors", []),
-            }
-
-        # Get all climate entities that can potentially run, sorted by priority
-        available_climates = []
-        for entity_id, climate_data in climate_entities.items():
-            if climate_data["can_run"]:  # enabled, windows closed, available
-                available_climates.append(
-                    {
-                        "entity_id": entity_id,
-                        "priority": climate_data["priority"],
-                        "power": climate_data["current_power"],
-                        "name": climate_data["name"],
-                        "current_state": climate_data["state"],
-                        "desired_hvac_mode": climate_data["desired_hvac_mode"],
-                        "target_temperature": climate_data.get("target_temperature"),
-                        "recent_hvac_change": climate_data.get("recent_hvac_change"),
-                    }
-                )
-
-        # Sort by priority (lower number = higher priority)
-        available_climates.sort(key=lambda x: x["priority"])
-
-        # Decision logic - determine which ACs should run
         decisions = {
             "climate_decisions": {},
             "total_power_needed": 0,
             "reason": "no_available_climates",
             "available_surplus": predicted_surplus,
+            "critical_input_errors": sensor_data.get("critical_input_errors", []),
         }
 
-        if not available_climates:
-            # No climate entities can run
-            for entity_id in climate_entities:
+        forced_on_climates = []
+        solar_based_climates = []
+
+        for entity_id, climate_data in climate_entities.items():
+            preset_mode = climate_data.get("preset_mode", PRESET_SOLAR_BASED)
+            climate_payload = {
+                "entity_id": entity_id,
+                "priority": climate_data["priority"],
+                "power": climate_data["current_power"],
+                "name": climate_data["name"],
+                "current_state": climate_data["state"],
+                "desired_hvac_mode": climate_data["desired_hvac_mode"],
+                "target_temperature": climate_data.get("target_temperature"),
+                "recent_hvac_change": climate_data.get("recent_hvac_change"),
+            }
+
+            if preset_mode == PRESET_OFF:
                 decisions["climate_decisions"][entity_id] = {
                     "should_cool": False,
-                    "reason": "cannot_run",
+                    "reason": PRESET_OFF,
+                    "power": climate_data.get("current_power", 0),
                 }
+                continue
+
+            if preset_mode == PRESET_ON:
+                forced_on_climates.append(climate_payload)
+                continue
+
+            if sensor_data.get("critical_input_errors"):
+                decisions["climate_decisions"][entity_id] = {
+                    "should_cool": False,
+                    "reason": "critical_inputs_invalid",
+                    "power": climate_data.get("current_power", 0),
+                }
+                continue
+
+            if climate_data["can_run"]:
+                solar_based_climates.append(climate_payload)
+                continue
+
+            reason = "cannot_run"
+            if climate_data.get("manual_override"):
+                reason = "manual_override"
+            elif climate_data.get("windows_open"):
+                reason = "windows_open"
+            elif not climate_data.get("available"):
+                reason = "unavailable"
+
+            decisions["climate_decisions"][entity_id] = {
+                "should_cool": False,
+                "reason": reason,
+                "power": climate_data.get("current_power", 0),
+            }
+
+        for climate in forced_on_climates:
+            entity_id = climate["entity_id"]
+            decisions["climate_decisions"][entity_id] = {
+                "should_cool": True,
+                "reason": PRESET_ON,
+                "power": climate["power"],
+            }
+
+        solar_based_climates.sort(key=lambda x: x["priority"])
+
+        if not forced_on_climates and not solar_based_climates:
+            decisions["reason"] = (
+                "critical_inputs_invalid"
+                if sensor_data.get("critical_input_errors")
+                else "no_available_climates"
+            )
             return decisions
 
-        # Calculate which ACs should run based on available surplus and priority
-        running_power = 0
-        decisions["reason"] = "insufficient_surplus"
+        running_power = sum(climate["power"] for climate in forced_on_climates)
+        if forced_on_climates:
+            decisions["reason"] = f"forced_on_{len(forced_on_climates)}_units"
+        else:
+            decisions["reason"] = "insufficient_surplus"
 
-        for climate in available_climates:
+        for climate in solar_based_climates:
             entity_id = climate["entity_id"]
             power_needed = climate["power"]
             current_state = climate["current_state"]
@@ -714,23 +769,10 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
         # Set decisions for climate entities that cannot run
         for entity_id, climate_data in climate_entities.items():
-            if (
-                not climate_data["can_run"]
-                and entity_id not in decisions["climate_decisions"]
-            ):
-                reason = "disabled"
-                if climate_data["manual_override"]:
-                    reason = "manual_override"
-                elif not climate_data["enabled"]:
-                    reason = "disabled"
-                elif climate_data["windows_open"]:
-                    reason = "windows_open"
-                elif not climate_data["available"]:
-                    reason = "unavailable"
-
+            if entity_id not in decisions["climate_decisions"]:
                 decisions["climate_decisions"][entity_id] = {
                     "should_cool": False,
-                    "reason": reason,
+                    "reason": "cannot_run",
                     "power": climate_data["current_power"],
                 }
 

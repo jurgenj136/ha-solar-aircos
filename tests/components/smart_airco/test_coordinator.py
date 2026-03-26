@@ -10,8 +10,12 @@ from homeassistant.util import dt as dt_util
 from custom_components.smart_airco.const import (
     CONF_CLIMATE_HVAC_MODE,
     CONF_CLIMATE_MANUAL_OVERRIDE,
+    CONF_CLIMATE_PRESET_MODE,
     CONF_CLIMATE_TARGET_TEMPERATURE,
     DOMAIN,
+    PRESET_OFF,
+    PRESET_ON,
+    PRESET_SOLAR_BASED,
 )
 from custom_components.smart_airco.coordinator import SmartAircoCoordinator
 
@@ -107,11 +111,11 @@ async def test_calculate_airco_decisions_respects_priority_and_reasons(
 
 
 @pytest.mark.asyncio
-async def test_calculate_airco_decisions_marks_manual_override(
+async def test_calculate_airco_decisions_respects_off_preset(
     hass, mock_config_entry, seed_states
 ) -> None:
+    mock_config_entry.data["climate_entities"][1][CONF_CLIMATE_PRESET_MODE] = PRESET_OFF
     mock_config_entry.data["climate_entities"][1]["enabled"] = False
-    mock_config_entry.data["climate_entities"][1][CONF_CLIMATE_MANUAL_OVERRIDE] = True
     coordinator = SmartAircoCoordinator(hass, mock_config_entry)
 
     sensor_data = await coordinator._fetch_sensor_data()
@@ -119,9 +123,7 @@ async def test_calculate_airco_decisions_marks_manual_override(
     decisions = coordinator._calculate_airco_decisions(sensor_data, calculations)
 
     assert decisions["climate_decisions"]["climate.bedroom"]["should_cool"] is False
-    assert (
-        decisions["climate_decisions"]["climate.bedroom"]["reason"] == "manual_override"
-    )
+    assert decisions["climate_decisions"]["climate.bedroom"]["reason"] == PRESET_OFF
 
 
 @pytest.mark.asyncio
@@ -142,10 +144,28 @@ async def test_invalid_forecast_input_forces_fail_safe_decisions(
     )
     assert calculations["critical_inputs_valid"] is False
     assert decisions["reason"] == "critical_inputs_invalid"
-    assert all(
-        not decision["should_cool"]
-        for decision in decisions["climate_decisions"].values()
+
+
+@pytest.mark.asyncio
+async def test_force_on_preset_ignores_invalid_inputs_and_windows(
+    hass, mock_config_entry, seed_states
+) -> None:
+    mock_config_entry.data["climate_entities"][0][CONF_CLIMATE_PRESET_MODE] = PRESET_ON
+    hass.states.async_set("sensor.solar_forecast", "3500", {})
+    hass.states.async_set(
+        "binary_sensor.living_room_window",
+        "on",
+        {"device_class": "window"},
     )
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+
+    sensor_data = await coordinator._fetch_sensor_data()
+    calculations = coordinator._calculate_energy_data(sensor_data)
+    decisions = coordinator._calculate_airco_decisions(sensor_data, calculations)
+
+    assert decisions["climate_decisions"]["climate.living_room"]["should_cool"] is True
+    assert decisions["climate_decisions"]["climate.living_room"]["reason"] == PRESET_ON
+    assert decisions["climate_decisions"]["climate.bedroom"]["should_cool"] is False
 
 
 @pytest.mark.asyncio
@@ -238,6 +258,8 @@ async def test_execute_decisions_only_calls_state_changes_when_needed(
         dict(climate) for climate in mock_config_entry.data["climate_entities"]
     ]
     updated_climates[0][CONF_CLIMATE_TARGET_TEMPERATURE] = 21.0
+    updated_climates[0][CONF_CLIMATE_PRESET_MODE] = PRESET_SOLAR_BASED
+    updated_climates[1][CONF_CLIMATE_PRESET_MODE] = PRESET_SOLAR_BASED
     mock_config_entry = mock_config_entry.__class__(
         domain=mock_config_entry.domain,
         title=mock_config_entry.title,
@@ -295,6 +317,7 @@ async def test_execute_decisions_uses_controller_heat_mode(
         dict(climate) for climate in mock_config_entry.data["climate_entities"]
     ]
     updated_climates[0][CONF_CLIMATE_HVAC_MODE] = "heat"
+    updated_climates[0][CONF_CLIMATE_PRESET_MODE] = PRESET_SOLAR_BASED
     heat_entry = mock_config_entry.__class__(
         domain=mock_config_entry.domain,
         title=mock_config_entry.title,
@@ -408,7 +431,9 @@ async def test_manual_override_disables_automation_for_changed_ac(
         for c in setup_integration.data["climate_entities"]
         if c["entity_id"] == "climate.bedroom"
     )
-    assert bedroom["enabled"] is False
+    assert bedroom["enabled"] is True
+    assert bedroom[CONF_CLIMATE_PRESET_MODE] == PRESET_ON
+    assert bedroom[CONF_CLIMATE_HVAC_MODE] == "cool"
     assert bedroom[CONF_CLIMATE_MANUAL_OVERRIDE] is True
     reload_mock.assert_awaited_with(setup_integration.entry_id)
 
@@ -430,6 +455,7 @@ async def test_manual_override_detects_supported_attribute_change(
         if c["entity_id"] == "climate.bedroom"
     )
     assert bedroom["enabled"] is False
+    assert bedroom[CONF_CLIMATE_PRESET_MODE] == PRESET_OFF
     assert bedroom[CONF_CLIMATE_MANUAL_OVERRIDE] is True
 
 

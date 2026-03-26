@@ -17,6 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from .const import (
     CONF_CLIMATE_ENTITIES,
     CONF_CLIMATE_HVAC_MODE,
+    CONF_CLIMATE_PRESET_MODE,
     CONF_CLIMATE_TARGET_TEMPERATURE,
     CONF_CONTROLLER_HVAC_MODE,
     CONF_CONTROLLER_TARGET_TEMPERATURE,
@@ -27,9 +28,12 @@ from .const import (
     CONF_CLIMATE_PRIORITY,
     DOMAIN,
     DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_PRESET_MODE,
     DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DEFAULT_CONTROLLER_HVAC_MODE,
     DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
+    PRESET_OFF,
+    PRESET_SOLAR_BASED,
     SERVICE_EVALUATE_CONDITIONS,
     SERVICE_EXECUTE_DECISIONS,
     SERVICE_FORCE_UPDATE,
@@ -200,7 +204,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_migrate_entry_data(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> ConfigEntry:
-    """Migrate older Smart Airco config data to per-climate mode/temperature fields."""
+    """Migrate older Smart Airco config data to the current per-climate model."""
     climate_entities = entry.data.get(CONF_CLIMATE_ENTITIES, [])
     if not isinstance(climate_entities, list):
         return entry
@@ -220,11 +224,22 @@ async def _async_migrate_entry_data(
             continue
 
         updated = dict(climate)
+        if CONF_CLIMATE_PRESET_MODE not in updated:
+            updated[CONF_CLIMATE_PRESET_MODE] = (
+                PRESET_SOLAR_BASED
+                if updated.get(CONF_CLIMATE_ENABLED, True)
+                else PRESET_OFF
+            )
+            changed = True
         if CONF_CLIMATE_HVAC_MODE not in updated:
             updated[CONF_CLIMATE_HVAC_MODE] = default_hvac_mode
             changed = True
         if CONF_CLIMATE_TARGET_TEMPERATURE not in updated:
             updated[CONF_CLIMATE_TARGET_TEMPERATURE] = default_target_temperature
+            changed = True
+        should_be_enabled = updated.get(CONF_CLIMATE_PRESET_MODE) != PRESET_OFF
+        if updated.get(CONF_CLIMATE_ENABLED, True) != should_be_enabled:
+            updated[CONF_CLIMATE_ENABLED] = should_be_enabled
             changed = True
         migrated_climates.append(updated)
 
@@ -400,6 +415,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
         old_enabled = climate_entities[climate_index].get(CONF_CLIMATE_ENABLED, True)
         climate_entities[climate_index][CONF_CLIMATE_ENABLED] = enabled
+        climate_entities[climate_index][CONF_CLIMATE_PRESET_MODE] = (
+            PRESET_SOLAR_BASED if enabled else PRESET_OFF
+        )
         climate_entities[climate_index][CONF_CLIMATE_MANUAL_OVERRIDE] = False
         if not enabled:
             await coordinator.async_set_climate_mode(
@@ -493,6 +511,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             ),
             "priority": data.get("priority", (len(climate_entities) + 1)),
             "manual_override": False,
+            CONF_CLIMATE_PRESET_MODE: (
+                DEFAULT_CLIMATE_PRESET_MODE if data.get("enabled", True) else PRESET_OFF
+            ),
             CONF_CLIMATE_HVAC_MODE: coordinator.config.get(
                 CONF_CONTROLLER_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE
             ),

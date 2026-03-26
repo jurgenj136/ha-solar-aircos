@@ -18,7 +18,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE, DOMAIN
+from .const import (
+    CONF_CLIMATE_HVAC_MODE,
+    CONF_CLIMATE_PRESET_MODE,
+    DEFAULT_CLIMATE_HVAC_MODE,
+    DOMAIN,
+)
 from .coordinator import SmartAircoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -321,6 +326,10 @@ class SmartAircoSystemStatusSensor(SmartAircoBaseSensor):
                     "smart_airco_hvac_mode": climate_data.get(
                         "desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE
                     ),
+                    "smart_airco_preset_mode": climate_data.get(
+                        "preset_mode",
+                        config.get(CONF_CLIMATE_PRESET_MODE, "solar_based"),
+                    ),
                     "smart_airco_target_temperature": climate_data.get(
                         "target_temperature"
                     ),
@@ -428,6 +437,9 @@ class SmartAircoClimatePowerSensor(SmartAircoBaseSensor):
             "entity_id": entity_id,
             "state": climate_data.get("state", "unknown"),
             "smart_airco_hvac_mode": desired_hvac_mode,
+            "smart_airco_preset_mode": self.climate_config.get(
+                CONF_CLIMATE_PRESET_MODE, "solar_based"
+            ),
             "power_source": climate_data.get("power_source", "unknown"),
             "estimated_power": self.climate_config.get("wattage", 0),
             "priority": climate_data.get("priority", 999),
