@@ -24,20 +24,20 @@ from .const import (
     CONF_CLIMATE_ENTITIES,
     CONF_CLIMATE_ENTITY_ID,
     CONF_CLIMATE_ENABLED,
+    CONF_CLIMATE_HVAC_MODE,
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_NAME,
     CONF_CLIMATE_POWER_SENSOR,
     CONF_CLIMATE_PRIORITY,
+    CONF_CLIMATE_TARGET_TEMPERATURE,
     CONF_CLIMATE_USE_ESTIMATED_POWER,
     CONF_CLIMATE_WATTAGE,
     CONF_CLIMATE_WINDOW_SENSORS,
-    CONF_CONTROLLER_HVAC_MODE,
-    CONF_CONTROLLER_TARGET_TEMPERATURE,
     CONF_NET_EXPORT_SENSOR,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
-    DEFAULT_CONTROLLER_HVAC_MODE,
-    DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
+    DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
 )
@@ -96,16 +96,17 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         """Get the configured climate entities."""
         return self.config.get(CONF_CLIMATE_ENTITIES, [])
 
-    @property
-    def controller_hvac_mode(self) -> str:
-        """Return the configured Smart Airco HVAC mode."""
-        return self.config.get(CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE)
+    def climate_hvac_mode(self, climate_config: Mapping[str, Any]) -> str:
+        """Return the configured Smart Airco HVAC mode for one climate."""
+        value = climate_config.get(CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE)
+        return value if isinstance(value, str) else DEFAULT_CLIMATE_HVAC_MODE
 
-    @property
-    def controller_target_temperature(self) -> float | None:
-        """Return the configured Smart Airco target temperature."""
-        value = self.config.get(
-            CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+    def climate_target_temperature(
+        self, climate_config: Mapping[str, Any]
+    ) -> float | None:
+        """Return the configured Smart Airco target temperature for one climate."""
+        value = climate_config.get(
+            CONF_CLIMATE_TARGET_TEMPERATURE, DEFAULT_CLIMATE_TARGET_TEMPERATURE
         )
         if value is None:
             return None
@@ -351,6 +352,8 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 ),
                 "priority": climate_config.get(CONF_CLIMATE_PRIORITY, 999),
                 "name": climate_config.get(CONF_CLIMATE_NAME, entity_id),
+                "desired_hvac_mode": self.climate_hvac_mode(climate_config),
+                "target_temperature": self.climate_target_temperature(climate_config),
             }
 
             # Get climate entity state
@@ -401,7 +404,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             climate_data["current_power"] = power_consumption
 
             # Only count power if AC is currently running (cooling)
-            if climate_data["state"] == self.controller_hvac_mode:
+            if climate_data["state"] == climate_data["desired_hvac_mode"]:
                 total_airco_consumption += power_consumption
 
             # Check window sensors
@@ -602,6 +605,8 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                         "power": climate_data["current_power"],
                         "name": climate_data["name"],
                         "current_state": climate_data["state"],
+                        "desired_hvac_mode": climate_data["desired_hvac_mode"],
+                        "target_temperature": climate_data.get("target_temperature"),
                         "recent_hvac_change": climate_data.get("recent_hvac_change"),
                     }
                 )
@@ -634,11 +639,12 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             entity_id = climate["entity_id"]
             power_needed = climate["power"]
             current_state = climate["current_state"]
+            desired_hvac_mode = climate["desired_hvac_mode"]
 
             min_run_remaining = self._minimum_run_time_remaining(
                 current_state,
                 climate.get("recent_hvac_change"),
-                self.controller_hvac_mode,
+                desired_hvac_mode,
             )
             if min_run_remaining is not None:
                 decisions["climate_decisions"][entity_id] = {
@@ -655,7 +661,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             min_off_remaining = self._minimum_off_time_remaining(
                 current_state,
                 climate.get("recent_hvac_change"),
-                self.controller_hvac_mode,
+                desired_hvac_mode,
             )
             if min_off_remaining is not None:
                 decisions["climate_decisions"][entity_id] = {
@@ -666,7 +672,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 continue
 
             # Check if we have enough surplus for this AC
-            if current_state == self.controller_hvac_mode:
+            if current_state == desired_hvac_mode:
                 can_run = (
                     running_power + power_needed
                     <= predicted_surplus + _SURPLUS_HYSTERESIS_WATTS
@@ -834,10 +840,6 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         climate_decisions = decisions.get("climate_decisions", {})
         sensor_data = self.data.get("sensors", {})
         climate_entities = sensor_data.get("climate_entities", {})
-        controller_hvac_mode = self.config.get(
-            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
-        )
-        controller_target_temperature = self.controller_target_temperature
 
         _LOGGER.info(
             "Executing decisions: %s (surplus: %dW, total needed: %dW)",
@@ -854,6 +856,12 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             current_state = climate_entities[entity_id]["state"]
             should_cool = climate_decision["should_cool"]
             climate_name = climate_entities[entity_id]["name"]
+            desired_hvac_mode = climate_entities[entity_id].get(
+                "desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE
+            )
+            desired_target_temperature = climate_entities[entity_id].get(
+                "target_temperature"
+            )
             climate_state = self.hass.states.get(entity_id)
             current_target_temperature = None
             if climate_state is not None:
@@ -874,25 +882,25 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             )
 
             # Execute state change if needed
-            if should_cool and current_state != controller_hvac_mode:
+            if should_cool and current_state != desired_hvac_mode:
                 _LOGGER.info(
                     "Turning ON %s (%s) in %s mode - %s",
                     climate_name,
                     entity_id,
-                    controller_hvac_mode,
+                    desired_hvac_mode,
                     climate_decision.get("reason"),
                 )
-                await self.async_set_climate_mode(entity_id, controller_hvac_mode)
-                if controller_target_temperature is not None:
+                await self.async_set_climate_mode(entity_id, desired_hvac_mode)
+                if desired_target_temperature is not None:
                     await self.async_set_climate_temperature(
-                        entity_id, controller_target_temperature
+                        entity_id, desired_target_temperature
                     )
             elif (
                 should_cool
-                and controller_target_temperature is not None
+                and desired_target_temperature is not None
                 and (
                     current_target_temperature is None
-                    or abs(current_target_temperature - controller_target_temperature)
+                    or abs(current_target_temperature - desired_target_temperature)
                     >= 0.25
                 )
             ):
@@ -900,10 +908,10 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                     "Updating target temperature for %s (%s) to %s",
                     climate_name,
                     entity_id,
-                    controller_target_temperature,
+                    desired_target_temperature,
                 )
                 await self.async_set_climate_temperature(
-                    entity_id, controller_target_temperature
+                    entity_id, desired_target_temperature
                 )
             elif not should_cool and current_state not in ("off", "unknown"):
                 _LOGGER.info(

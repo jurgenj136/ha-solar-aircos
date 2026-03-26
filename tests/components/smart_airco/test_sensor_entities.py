@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from homeassistant.components.climate.const import HVACMode
-
-from custom_components.smart_airco.const import CONF_CONTROLLER_HVAC_MODE
 from custom_components.smart_airco.sensor import (
     SmartAircoClimatePowerSensor,
     SmartAircoClimateStatusSensor,
@@ -28,20 +26,26 @@ def _build_coordinator_with_data(hass, mock_config_entry) -> SmartAircoCoordinat
                     "enabled": True,
                     "can_run": True,
                     "state": "cool",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": 21.0,
                     "current_power": 950,
                     "power_source": "sensor",
                     "priority": 1,
                     "windows_open": False,
+                    "config": mock_config_entry.data["climate_entities"][0],
                 },
                 "climate.bedroom": {
                     "name": "Bedroom",
                     "enabled": True,
                     "can_run": False,
                     "state": "off",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": 20.0,
                     "current_power": 800,
                     "power_source": "estimated",
                     "priority": 2,
                     "windows_open": True,
+                    "config": mock_config_entry.data["climate_entities"][1],
                 },
             },
         },
@@ -128,12 +132,12 @@ def test_running_count_and_system_status_sensors(hass, mock_config_entry) -> Non
         "available_entities": 1,
     }
     assert status.native_value == "running_1_units"
-    assert status.extra_state_attributes == {
-        "available_surplus": 1950,
-        "total_power_needed": 950,
-        "critical_input_errors": [],
-        "last_update": "now",
-    }
+    attrs = status.extra_state_attributes
+    assert attrs["smart_airco_panel_anchor"] is True
+    assert attrs["available_surplus"] == 1950
+    assert attrs["predicted_surplus"] == 1950
+    assert attrs["running_entities"] == 1
+    assert attrs["managed_climates"][0]["smart_airco_hvac_mode"] == "cool"
 
 
 def test_running_count_uses_actual_hvac_state_not_desired_state(
@@ -182,24 +186,22 @@ def test_climate_status_sensor_maps_reason_and_live_temperatures(
 
 
 def test_running_and_power_sensors_follow_heat_mode(hass, mock_config_entry) -> None:
-    heat_entry = mock_config_entry.__class__(
-        domain=mock_config_entry.domain,
-        title=mock_config_entry.title,
-        data={**mock_config_entry.data, CONF_CONTROLLER_HVAC_MODE: HVACMode.HEAT},
-    )
-    coordinator = _build_coordinator_with_data(hass, heat_entry)
+    coordinator = _build_coordinator_with_data(hass, mock_config_entry)
     coordinator.data["sensors"]["climate_entities"]["climate.living_room"]["state"] = (
         "heat"
     )
+    coordinator.data["sensors"]["climate_entities"]["climate.living_room"][
+        "desired_hvac_mode"
+    ] = "heat"
 
-    running = SmartAircoRunningCountSensor(coordinator, heat_entry)
-    total = SmartAircoTotalConsumptionSensor(coordinator, heat_entry)
-    living_cfg = heat_entry.data["climate_entities"][0]
-    power = SmartAircoClimatePowerSensor(coordinator, heat_entry, living_cfg)
-    status = SmartAircoClimateStatusSensor(coordinator, heat_entry, living_cfg)
+    running = SmartAircoRunningCountSensor(coordinator, mock_config_entry)
+    total = SmartAircoTotalConsumptionSensor(coordinator, mock_config_entry)
+    living_cfg = mock_config_entry.data["climate_entities"][0]
+    power = SmartAircoClimatePowerSensor(coordinator, mock_config_entry, living_cfg)
+    status = SmartAircoClimateStatusSensor(coordinator, mock_config_entry, living_cfg)
 
     assert running.native_value == 1
     assert total.extra_state_attributes["running_count"] == 1
     assert power.native_value == 950
-    assert power.extra_state_attributes["controller_hvac_mode"] == HVACMode.HEAT
+    assert power.extra_state_attributes["smart_airco_hvac_mode"] == HVACMode.HEAT
     assert status.native_value == "heating"

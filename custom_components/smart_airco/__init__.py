@@ -16,6 +16,8 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     CONF_CLIMATE_ENTITIES,
+    CONF_CLIMATE_HVAC_MODE,
+    CONF_CLIMATE_TARGET_TEMPERATURE,
     CONF_CONTROLLER_HVAC_MODE,
     CONF_CONTROLLER_TARGET_TEMPERATURE,
     CONF_CONTROLLER_ENABLED,
@@ -24,6 +26,8 @@ from .const import (
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_PRIORITY,
     DOMAIN,
+    DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DEFAULT_CONTROLLER_HVAC_MODE,
     DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
     SERVICE_EVALUATE_CONDITIONS,
@@ -135,6 +139,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     register_panel = not hass.data[DOMAIN]
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    entry = await _async_migrate_entry_data(hass, entry)
+
     # Create the coordinator
     coordinator = SmartAircoCoordinator(hass, entry)
 
@@ -143,6 +149,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     entry.async_on_unload(coordinator.async_setup_manual_override_tracking())
+    entry.async_on_unload(
+        coordinator.async_add_listener(
+            lambda: hass.async_create_task(coordinator.async_execute_decisions())
+        )
+    )
 
     # Set up all platforms for this config entry
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -184,6 +195,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("Sidebar panel already removed or not present")
 
     return unload_ok
+
+
+async def _async_migrate_entry_data(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> ConfigEntry:
+    """Migrate older Smart Airco config data to per-climate mode/temperature fields."""
+    climate_entities = entry.data.get(CONF_CLIMATE_ENTITIES, [])
+    if not isinstance(climate_entities, list):
+        return entry
+
+    migrated_climates = []
+    changed = False
+    default_hvac_mode = entry.data.get(
+        CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+    )
+    default_target_temperature = entry.data.get(
+        CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+    )
+
+    for climate in climate_entities:
+        if not isinstance(climate, dict):
+            migrated_climates.append(climate)
+            continue
+
+        updated = dict(climate)
+        if CONF_CLIMATE_HVAC_MODE not in updated:
+            updated[CONF_CLIMATE_HVAC_MODE] = default_hvac_mode
+            changed = True
+        if CONF_CLIMATE_TARGET_TEMPERATURE not in updated:
+            updated[CONF_CLIMATE_TARGET_TEMPERATURE] = default_target_temperature
+            changed = True
+        migrated_climates.append(updated)
+
+    if changed:
+        new_data = {**entry.data, CONF_CLIMATE_ENTITIES: migrated_climates}
+        hass.config_entries.async_update_entry(entry, data=new_data)
+
+    return entry
 
 
 async def _async_register_services(hass: HomeAssistant) -> None:
@@ -444,6 +493,12 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             ),
             "priority": data.get("priority", (len(climate_entities) + 1)),
             "manual_override": False,
+            CONF_CLIMATE_HVAC_MODE: coordinator.config.get(
+                CONF_CONTROLLER_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE
+            ),
+            CONF_CLIMATE_TARGET_TEMPERATURE: coordinator.config.get(
+                CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CLIMATE_TARGET_TEMPERATURE
+            ),
             "use_estimated_power": data.get("use_estimated_power", True),
             "wattage": data.get("wattage", 1000),
             "power_sensor": data.get("power_sensor"),
@@ -494,12 +549,20 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         new_data.setdefault(
             CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
         )
+        climate_entities = deepcopy(new_data.get(CONF_CLIMATE_ENTITIES, []))
         if "controller_hvac_mode" in data:
             new_data[CONF_CONTROLLER_HVAC_MODE] = data["controller_hvac_mode"]
+            for climate in climate_entities:
+                climate[CONF_CLIMATE_HVAC_MODE] = data["controller_hvac_mode"]
         if "controller_target_temperature" in data:
             new_data[CONF_CONTROLLER_TARGET_TEMPERATURE] = data[
                 "controller_target_temperature"
             ]
+            for climate in climate_entities:
+                climate[CONF_CLIMATE_TARGET_TEMPERATURE] = data[
+                    "controller_target_temperature"
+                ]
+        new_data[CONF_CLIMATE_ENTITIES] = climate_entities
         hass.config_entries.async_update_entry(coordinator.entry, data=new_data)
 
     # Register all services

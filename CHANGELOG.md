@@ -93,6 +93,29 @@ version tags for public HACS releases.
   HVAC mode.
 - Added `.gitignore` coverage for generated checklist files.
 
+## [1.0.4] - 2026-03-25
+
+### Changed
+
+- Replaced the single shared Smart Airco controller climate entity model with
+  one Smart Airco companion climate entity per managed climate.
+- Each managed climate now owns its own Smart Airco HVAC mode and target
+  temperature instead of inheriting one shared controller setting.
+- The panel now edits per-climate Smart Airco behavior and uses the system
+  status sensor as the panel anchor instead of the removed controller climate.
+
+### Added
+
+- One Smart Airco climate entity per managed climate, exposing normal climate
+  controls plus Smart Airco participation via `preset_mode`.
+- Per-climate Smart Airco mode and target temperature settings.
+
+### Fixed
+
+- Smart Airco runtime execution now applies the correct mode and target
+  temperature per managed climate.
+- The panel no longer depends on the removed shared controller entity.
+
 ## [Unreleased]
 
 - No unreleased changes yet.

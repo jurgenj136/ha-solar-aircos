@@ -46,11 +46,11 @@ class SmartAircoPanel extends HTMLElement {
 
   _computeRenderSignature(hass) {
     const states = Object.values(hass?.states || {});
-    const controllers = states
+    const panelAnchors = states
       .filter(
         (state) =>
-          state.entity_id.startsWith('climate.') &&
-          state.attributes?.smart_airco_controller === true
+          state.entity_id.startsWith('sensor.') &&
+          state.attributes?.smart_airco_panel_anchor === true
       )
       .map((state) => ({
         entity_id: state.entity_id,
@@ -66,7 +66,7 @@ class SmartAircoPanel extends HTMLElement {
       }))
       .sort((left, right) => left.entity_id.localeCompare(right.entity_id));
     const climates = states
-      .filter((state) => state.entity_id.startsWith('climate.'))
+      .filter((state) => state.entity_id.startsWith('climate.') && !state.attributes?.smart_airco_managed)
       .map((state) => state.entity_id)
       .sort();
     const windows = states
@@ -78,42 +78,58 @@ class SmartAircoPanel extends HTMLElement {
       .map((state) => state.entity_id)
       .sort();
 
-    return JSON.stringify({ controllers, sensors, climates, windows });
+    const smartAircoClimates = states
+      .filter(
+        (state) => state.entity_id.startsWith('climate.') && state.attributes?.smart_airco_managed
+      )
+      .map((state) => ({ entity_id: state.entity_id, attributes: state.attributes }))
+      .sort((left, right) => left.entity_id.localeCompare(right.entity_id));
+
+    return JSON.stringify({ panelAnchors, smartAircoClimates, sensors, climates, windows });
   }
 
-  _getControllers(states) {
+  _getPanelAnchors(states) {
     return states.filter(
       (state) =>
-        state.entity_id.startsWith('climate.') &&
-        state.attributes?.smart_airco_controller === true
+        state.entity_id.startsWith('sensor.') &&
+        state.attributes?.smart_airco_panel_anchor === true
     );
   }
 
-  _getControllerSelection(controllers) {
+  _getAnchorSelection(anchors) {
     if (
       !this._activeEntryId ||
-      !controllers.some(
-        (controller) => controller.attributes?.smart_airco_entry_id === this._activeEntryId
+      !anchors.some(
+        (anchor) => anchor.attributes?.smart_airco_entry_id === this._activeEntryId
       )
     ) {
-      this._activeEntryId = controllers[0]?.attributes?.smart_airco_entry_id || null;
+      this._activeEntryId = anchors[0]?.attributes?.smart_airco_entry_id || null;
     }
 
-    const controller =
-      controllers.find(
-        (candidate) => candidate.attributes?.smart_airco_entry_id === this._activeEntryId
-      ) || controllers[0] || null;
+    const anchor =
+      anchors.find((candidate) => candidate.attributes?.smart_airco_entry_id === this._activeEntryId) ||
+      anchors[0] ||
+      null;
 
-    this._activeEntryId = controller?.attributes?.smart_airco_entry_id || null;
+    this._activeEntryId = anchor?.attributes?.smart_airco_entry_id || null;
     this._activeEntryTitle =
-      controller?.attributes?.friendly_name || controller?.entity_id || null;
-    return controller;
+      anchor?.attributes?.friendly_name || anchor?.entity_id || null;
+    return anchor;
   }
 
   _syncViewState() {
     const states = this._getStates();
-    const controller = this._getControllerSelection(this._getControllers(states));
+    const controller = this._getAnchorSelection(this._getPanelAnchors(states));
     const attrs = controller?.attributes || {};
+    const smartAircoClimateEntities = states.filter(
+      (state) =>
+        state.entity_id.startsWith('climate.') &&
+        state.attributes?.smart_airco_managed === true &&
+        state.attributes?.smart_airco_entry_id === this._activeEntryId
+    );
+    const smartAircoClimateEntityMap = Object.fromEntries(
+      smartAircoClimateEntities.map((state) => [state.attributes?.source_entity_id, state.entity_id])
+    );
     const managedClimates = Array.isArray(attrs.managed_climates) ? attrs.managed_climates : [];
     const configuredClimates = attrs.configured_climate_entity_ids || [];
     const sensorOptions = this._getSensorOptions(states);
@@ -128,12 +144,6 @@ class SmartAircoPanel extends HTMLElement {
     if (!this._globalDraft || entryChanged) {
       this._globalDraft = {
         entry_id: this._activeEntryId,
-        controller_hvac_mode: attrs.controller_hvac_mode || 'cool',
-        controller_target_temperature:
-          attrs.controller_target_temperature !== undefined &&
-          attrs.controller_target_temperature !== null
-            ? String(attrs.controller_target_temperature)
-            : '',
         forecast_sensor: attrs.forecast_sensor || '',
         production_sensor: attrs.production_sensor || '',
         net_export_sensor: attrs.net_export_sensor || '',
@@ -171,6 +181,7 @@ class SmartAircoPanel extends HTMLElement {
       controller,
       attrs,
       managedClimates,
+      smartAircoClimateEntityMap,
       sensorOptions,
       powerOptions,
       climateOptions,
@@ -200,6 +211,12 @@ class SmartAircoPanel extends HTMLElement {
       entity_id: climate.entity_id,
       priority: String(climate.priority ?? 1),
       enabled: Boolean(climate.enabled),
+      smart_airco_hvac_mode: climate.smart_airco_hvac_mode || 'cool',
+      smart_airco_target_temperature:
+        climate.smart_airco_target_temperature !== undefined &&
+        climate.smart_airco_target_temperature !== null
+          ? String(climate.smart_airco_target_temperature)
+          : '',
       use_estimated_power: Boolean(climate.use_estimated_power),
       wattage: String(climate.estimated_wattage ?? 1000),
       power_sensor: climate.power_sensor || '',
@@ -229,7 +246,7 @@ class SmartAircoPanel extends HTMLElement {
 
   _getClimateOptions(states) {
     return states
-      .filter((state) => state.entity_id.startsWith('climate.'))
+      .filter((state) => state.entity_id.startsWith('climate.') && !state.attributes?.smart_airco_managed)
       .map((state) => state.entity_id)
       .sort();
   }
@@ -353,12 +370,8 @@ class SmartAircoPanel extends HTMLElement {
     return String(reason || 'unknown').replaceAll('_', ' ');
   }
 
-  _currentRunMode() {
-    return this._viewModel?.attrs?.controller_hvac_mode || 'cool';
-  }
-
-  _currentRunModeLabel() {
-    return this._currentRunMode() === 'heat' ? 'Heating' : 'Cooling';
+  _climateRunModeLabel(mode) {
+    return mode === 'heat' ? 'Heating' : 'Cooling';
   }
 
   _formatDecisionReason(climate) {
@@ -378,17 +391,17 @@ class SmartAircoPanel extends HTMLElement {
     }
     if (reason.startsWith('minimum_run_time_remaining_')) {
       const seconds = reason.match(/minimum_run_time_remaining_(\d+)s/)?.[1] || '0';
-      return `Keeping this unit ${this._currentRunModeLabel().toLowerCase()} for ${this._formatDuration(seconds)}`;
+      return `Keeping this unit ${this._climateRunModeLabel(climate.smart_airco_hvac_mode).toLowerCase()} for ${this._formatDuration(seconds)}`;
     }
     if (reason.startsWith('minimum_off_time_remaining_')) {
       const seconds = reason.match(/minimum_off_time_remaining_(\d+)s/)?.[1] || '0';
       return `Waiting ${this._formatDuration(seconds)} before restarting`;
     }
     if (reason.includes('running_with_hysteresis')) {
-      return `${this._currentRunModeLabel()} remains allowed because surplus is still within the safety margin`;
+      return `${this._climateRunModeLabel(climate.smart_airco_hvac_mode)} remains allowed because surplus is still within the safety margin`;
     }
     if (reason.includes('surplus_available_with_hysteresis')) {
-      return `Enough predicted solar surplus is available to start ${this._currentRunModeLabel().toLowerCase()} this climate`;
+      return `Enough predicted solar surplus is available to start ${this._climateRunModeLabel(climate.smart_airco_hvac_mode).toLowerCase()} this climate`;
     }
     if (reason.startsWith('insufficient_surplus_')) {
       const need = reason.match(/need_(-?\d+)W/)?.[1];
@@ -418,8 +431,11 @@ class SmartAircoPanel extends HTMLElement {
     if (climate.reason === 'critical_inputs_invalid') {
       return { label: 'Waiting for sensors', tone: 'danger' };
     }
-    if (climate.state === 'cool') {
-      return { label: 'Cooling', tone: 'ok' };
+    if (climate.state === climate.smart_airco_hvac_mode) {
+      return {
+        label: climate.smart_airco_hvac_mode === 'heat' ? 'Heating' : 'Cooling',
+        tone: 'ok',
+      };
     }
     if ((climate.reason || '').startsWith('minimum_off_time_remaining_')) {
       return { label: 'Cooldown', tone: 'neutral' };
@@ -526,8 +542,6 @@ class SmartAircoPanel extends HTMLElement {
 
   _renderSetupSection(attrs, sensorOptions, managedClimates) {
     const draft = this._globalDraft || {
-      controller_hvac_mode: 'cool',
-      controller_target_temperature: '',
       forecast_sensor: '',
       production_sensor: '',
       net_export_sensor: '',
@@ -547,21 +561,6 @@ class SmartAircoPanel extends HTMLElement {
         </div>
         ${this._renderSetupChecklist(attrs, managedClimates)}
         <div class="field-grid">
-          <div class="field-card">
-            <label for="sel-controller-mode">Controller mode</label>
-            <select id="sel-controller-mode" data-global-field="controller_hvac_mode">
-              <option value="cool" ${draft.controller_hvac_mode === 'cool' ? 'selected' : ''}>Cool</option>
-              <option value="heat" ${draft.controller_hvac_mode === 'heat' ? 'selected' : ''}>Heat</option>
-            </select>
-            <p class="field-help">Choose whether Smart Airco should run managed climates in cooling mode or heating mode when enough surplus is available.</p>
-          </div>
-          <div class="field-card">
-            <label for="inp-controller-temp">Controller target temperature</label>
-            <input id="inp-controller-temp" data-global-field="controller_target_temperature" type="number" min="10" max="35" step="0.5" value="${this._escape(
-              draft.controller_target_temperature || ''
-            )}" />
-            <p class="field-help">Shared target temperature applied to all climates that are currently enabled for Smart Airco control when they run.</p>
-          </div>
           <div class="field-card">
             <label for="sel-forecast">Forecast sensor</label>
             <select id="sel-forecast" data-global-field="forecast_sensor">${this._selectOptions(
@@ -618,15 +617,6 @@ class SmartAircoPanel extends HTMLElement {
           </div>
         </div>
         <div class="metrics-grid">
-          <div class="metric-card"><span class="metric-label">Controller</span><strong>${this._escape(
-            attrs.controller_enabled ? 'Enabled' : 'Disabled'
-          )}</strong></div>
-          <div class="metric-card"><span class="metric-label">Run mode</span><strong>${this._escape(
-            attrs.controller_hvac_mode || 'cool'
-          )}</strong></div>
-          <div class="metric-card"><span class="metric-label">Shared target</span><strong>${this._escape(
-            attrs.controller_target_temperature ?? 'Not set'
-          )}${attrs.controller_target_temperature !== undefined && attrs.controller_target_temperature !== null ? ' °C' : ''}</strong></div>
           <div class="metric-card"><span class="metric-label">Predicted surplus</span><strong>${this._escape(
             attrs.predicted_surplus || 0
           )} W</strong></div>
@@ -645,9 +635,7 @@ class SmartAircoPanel extends HTMLElement {
         </div>
         <div class="status-band">
           <span class="status-label">Current summary</span>
-          <strong>${this._escape(this._currentRunModeLabel())} strategy: ${this._rawReasonToText(
-            attrs.decision_reason || 'unknown'
-          )}</strong>
+          <strong>${this._escape(this._rawReasonToText(controller?.state || attrs.decision_reason || 'unknown'))}</strong>
         </div>
         ${
           criticalErrors.length
@@ -778,6 +766,7 @@ class SmartAircoPanel extends HTMLElement {
     const badge = this._getClimateStateBadge(climate);
     const draft = this._climateDrafts[climate.entity_id] || this._buildClimateDraft(climate);
     const isEditing = this._editingClimateId === climate.entity_id;
+    const smartAircoEntityId = this._viewModel.smartAircoClimateEntityMap[climate.entity_id] || null;
     const windowsLabel = climate.window_sensors?.length
       ? `${climate.window_sensors.length} sensor${climate.window_sensors.length === 1 ? '' : 's'}`
       : 'No window sensors';
@@ -808,6 +797,12 @@ class SmartAircoPanel extends HTMLElement {
               <div><span class="meta-label">Automation</span><strong>${this._escape(
                 climate.enabled ? 'Controlled by Smart Airco' : 'Ignored by Smart Airco'
               )}</strong></div>
+              <div><span class="meta-label">Smart Airco mode</span><strong>${this._escape(
+                climate.smart_airco_hvac_mode || 'cool'
+              )}</strong></div>
+              <div><span class="meta-label">Target temperature</span><strong>${this._escape(
+                climate.smart_airco_target_temperature ?? 'Not set'
+              )}${climate.smart_airco_target_temperature !== undefined && climate.smart_airco_target_temperature !== null ? ' °C' : ''}</strong></div>
               <div><span class="meta-label">Windows</span><strong>${this._escape(
                 climate.windows_open ? 'Open / blocking' : windowsLabel
               )}</strong></div>
@@ -846,17 +841,46 @@ class SmartAircoPanel extends HTMLElement {
             >${isEditing ? 'Close editor' : 'Edit settings'}</button>
           </div>
         </div>
-        ${isEditing ? this._renderClimateEditor(climate, draft, powerOptions, windowOptions) : ''}
+        ${isEditing ? this._renderClimateEditor(climate, draft, powerOptions, windowOptions, smartAircoEntityId) : ''}
       </article>
     `;
   }
 
-  _renderClimateEditor(climate, draft, powerOptions, windowOptions) {
+  _renderClimateEditor(climate, draft, powerOptions, windowOptions, smartAircoEntityId) {
     return `
       <div class="editor-panel">
         <div class="editor-grid">
           <section class="editor-section">
             <h4>Automation</h4>
+            <label class="checkbox-line">
+              <input
+                data-climate-field="enabled"
+                data-climate-id="${this._escape(climate.entity_id)}"
+                type="checkbox"
+                ${draft.enabled ? 'checked' : ''}
+              />
+              Smart Airco may control this climate
+            </label>
+            <label for="hvac-mode-${this._escape(climate.entity_id)}">Smart Airco mode</label>
+            <select
+              id="hvac-mode-${this._escape(climate.entity_id)}"
+              data-climate-field="smart_airco_hvac_mode"
+              data-climate-id="${this._escape(climate.entity_id)}"
+            >
+              <option value="cool" ${draft.smart_airco_hvac_mode === 'cool' ? 'selected' : ''}>Cool</option>
+              <option value="heat" ${draft.smart_airco_hvac_mode === 'heat' ? 'selected' : ''}>Heat</option>
+            </select>
+            <label for="target-temp-${this._escape(climate.entity_id)}">Target temperature</label>
+            <input
+              id="target-temp-${this._escape(climate.entity_id)}"
+              data-climate-field="smart_airco_target_temperature"
+              data-climate-id="${this._escape(climate.entity_id)}"
+              type="number"
+              min="10"
+              max="35"
+              step="0.5"
+              value="${this._escape(draft.smart_airco_target_temperature)}"
+            />
             <label for="priority-${this._escape(climate.entity_id)}">Priority</label>
             <input
               id="priority-${this._escape(climate.entity_id)}"
@@ -873,6 +897,13 @@ class SmartAircoPanel extends HTMLElement {
               type="button"
               ${this._isPending(`priority:${climate.entity_id}`) ? 'disabled' : ''}
             >${this._isPending(`priority:${climate.entity_id}`) ? 'Saving...' : 'Save priority'}</button>
+            <button
+              data-action="save-smart-airco"
+              data-climate-id="${this._escape(climate.entity_id)}"
+              data-smart-airco-entity-id="${this._escape(smartAircoEntityId || '')}"
+              type="button"
+              ${this._isPending(`smart-airco:${climate.entity_id}`) ? 'disabled' : ''}
+            >${this._isPending(`smart-airco:${climate.entity_id}`) ? 'Saving...' : 'Save Smart Airco mode'}</button>
           </section>
           <section class="editor-section">
             <h4>Power</h4>
@@ -1368,10 +1399,9 @@ class SmartAircoPanel extends HTMLElement {
           </div>
           <div class="hero-meta">
             <span class="tag neutral">${this._escape(this._activeEntryTitle || 'No controller')}</span>
-            <span class="tag ${attrs.controller_enabled ? 'ok' : 'neutral'}">${this._escape(
-              attrs.controller_enabled ? 'Controller enabled' : 'Controller disabled'
+            <span class="tag neutral">${this._escape(
+              managedClimates.length ? `${managedClimates.length} managed climates` : 'No managed climates'
             )}</span>
-            <span class="tag neutral">${this._escape(this._currentRunModeLabel())} mode</span>
           </div>
         </section>
         ${this._renderNotice()}
@@ -1478,25 +1508,17 @@ class SmartAircoPanel extends HTMLElement {
 
     if (action === 'save-global') {
       const draft = this._globalDraft || {};
-        const updateIntervalMinutes = Number.parseInt(draft.update_interval_minutes || '5', 10);
-        const controllerTargetTemperature = Number.parseFloat(
-          draft.controller_target_temperature || ''
-        );
-        await this._runPanelAction('save-global', async () => {
-          const payload = {
-            controller_hvac_mode: draft.controller_hvac_mode || 'cool',
-            forecast_sensor: draft.forecast_sensor || null,
-            production_sensor: draft.production_sensor || null,
-            net_export_sensor: draft.net_export_sensor || null,
-            update_interval_minutes: Number.isFinite(updateIntervalMinutes)
-              ? updateIntervalMinutes
-              : 5,
-          };
-          if (Number.isFinite(controllerTargetTemperature)) {
-            payload.controller_target_temperature = controllerTargetTemperature;
-          }
-          await this._callSmartAircoService('set_global_settings', payload);
-        }, 'Setup saved.');
+      const updateIntervalMinutes = Number.parseInt(draft.update_interval_minutes || '5', 10);
+      await this._runPanelAction('save-global', async () => {
+        await this._callSmartAircoService('set_global_settings', {
+          forecast_sensor: draft.forecast_sensor || null,
+          production_sensor: draft.production_sensor || null,
+          net_export_sensor: draft.net_export_sensor || null,
+          update_interval_minutes: Number.isFinite(updateIntervalMinutes)
+            ? updateIntervalMinutes
+            : 5,
+        });
+      }, 'Setup saved.');
       return;
     }
 
@@ -1541,12 +1563,47 @@ class SmartAircoPanel extends HTMLElement {
     }
 
     if (action === 'toggle-climate') {
+      const smartEntityId = this._viewModel.smartAircoClimateEntityMap[climateId];
+      if (!smartEntityId) {
+        this._setNotice('Smart Airco climate entity not found for this climate.', 'error');
+        return;
+      }
+      const nextEnabled = button instanceof HTMLInputElement ? button.checked : Boolean(draft.enabled);
+      draft.enabled = nextEnabled;
       await this._runPanelAction(`toggle:${climateId}`, async () => {
-        await this._callSmartAircoService('toggle_climate_entity', {
-          entity_id: climateId,
-          enabled: Boolean(draft.enabled),
+        await this._hass.callService('climate', 'set_preset_mode', {
+          entity_id: smartEntityId,
+          preset_mode: nextEnabled ? 'active' : 'inactive',
         });
-      }, draft.enabled ? 'Automation enabled for this climate.' : 'Automation disabled for this climate.');
+        this._scheduleFollowUpRenders();
+      }, nextEnabled ? 'Smart Airco control enabled for this climate.' : 'Smart Airco control disabled for this climate.');
+      return;
+    }
+
+    if (action === 'save-smart-airco') {
+      const smartEntityId = button.getAttribute('data-smart-airco-entity-id') || this._viewModel.smartAircoClimateEntityMap[climateId];
+      if (!smartEntityId) {
+        this._setNotice('Smart Airco climate entity not found for this climate.', 'error');
+        return;
+      }
+      const targetTemperature = Number.parseFloat(draft.smart_airco_target_temperature || '');
+      await this._runPanelAction(`smart-airco:${climateId}`, async () => {
+        await this._hass.callService('climate', 'set_preset_mode', {
+          entity_id: smartEntityId,
+          preset_mode: draft.enabled ? 'active' : 'inactive',
+        });
+        await this._hass.callService('climate', 'set_hvac_mode', {
+          entity_id: smartEntityId,
+          hvac_mode: draft.enabled ? draft.smart_airco_hvac_mode || 'cool' : 'off',
+        });
+        if (draft.enabled && Number.isFinite(targetTemperature)) {
+          await this._hass.callService('climate', 'set_temperature', {
+            entity_id: smartEntityId,
+            temperature: targetTemperature,
+          });
+        }
+        this._scheduleFollowUpRenders();
+      }, 'Smart Airco climate settings updated.');
       return;
     }
 

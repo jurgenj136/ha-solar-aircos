@@ -8,9 +8,9 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.smart_airco.const import (
+    CONF_CLIMATE_HVAC_MODE,
     CONF_CLIMATE_MANUAL_OVERRIDE,
-    CONF_CONTROLLER_HVAC_MODE,
-    CONF_CONTROLLER_TARGET_TEMPERATURE,
+    CONF_CLIMATE_TARGET_TEMPERATURE,
     DOMAIN,
 )
 from custom_components.smart_airco.coordinator import SmartAircoCoordinator
@@ -234,10 +234,14 @@ async def test_hysteresis_blocks_marginal_startup(
 async def test_execute_decisions_only_calls_state_changes_when_needed(
     hass, mock_config_entry, seed_states
 ) -> None:
+    updated_climates = [
+        dict(climate) for climate in mock_config_entry.data["climate_entities"]
+    ]
+    updated_climates[0][CONF_CLIMATE_TARGET_TEMPERATURE] = 21.0
     mock_config_entry = mock_config_entry.__class__(
         domain=mock_config_entry.domain,
         title=mock_config_entry.title,
-        data={**mock_config_entry.data, CONF_CONTROLLER_TARGET_TEMPERATURE: 21.0},
+        data={**mock_config_entry.data, "climate_entities": updated_climates},
     )
     coordinator = SmartAircoCoordinator(hass, mock_config_entry)
     coordinator.data = {
@@ -252,8 +256,18 @@ async def test_execute_decisions_only_calls_state_changes_when_needed(
         },
         "sensors": {
             "climate_entities": {
-                "climate.living_room": {"state": "off", "name": "Living Room"},
-                "climate.bedroom": {"state": "cool", "name": "Bedroom"},
+                "climate.living_room": {
+                    "state": "off",
+                    "name": "Living Room",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": 21.0,
+                },
+                "climate.bedroom": {
+                    "state": "cool",
+                    "name": "Bedroom",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": None,
+                },
             }
         },
     }
@@ -277,10 +291,14 @@ async def test_execute_decisions_only_calls_state_changes_when_needed(
 async def test_execute_decisions_uses_controller_heat_mode(
     hass, mock_config_entry, seed_states
 ) -> None:
+    updated_climates = [
+        dict(climate) for climate in mock_config_entry.data["climate_entities"]
+    ]
+    updated_climates[0][CONF_CLIMATE_HVAC_MODE] = "heat"
     heat_entry = mock_config_entry.__class__(
         domain=mock_config_entry.domain,
         title=mock_config_entry.title,
-        data={**mock_config_entry.data, CONF_CONTROLLER_HVAC_MODE: "heat"},
+        data={**mock_config_entry.data, "climate_entities": updated_climates},
     )
     coordinator = SmartAircoCoordinator(hass, heat_entry)
     coordinator.data = {
@@ -294,7 +312,12 @@ async def test_execute_decisions_uses_controller_heat_mode(
         },
         "sensors": {
             "climate_entities": {
-                "climate.living_room": {"state": "off", "name": "Living Room"},
+                "climate.living_room": {
+                    "state": "off",
+                    "name": "Living Room",
+                    "desired_hvac_mode": "heat",
+                    "target_temperature": None,
+                },
             }
         },
     }
@@ -353,6 +376,7 @@ async def test_runtime_reload_updates_coordinator_config(
 ) -> None:
     coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
     reload_mock = hass.data["smart_airco_test_reload_mock"]
+    reload_mock.reset_mock()
 
     hass.config_entries.async_update_entry(
         setup_integration,

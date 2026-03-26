@@ -20,16 +20,23 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    CONF_CONTROLLER_ENABLED,
-    CONF_CONTROLLER_HVAC_MODE,
-    CONF_CONTROLLER_TARGET_TEMPERATURE,
+    CONF_CLIMATE_ENABLED,
+    CONF_CLIMATE_ENTITIES,
+    CONF_CLIMATE_ENTITY_ID,
+    CONF_CLIMATE_HVAC_MODE,
+    CONF_CLIMATE_MANUAL_OVERRIDE,
+    CONF_CLIMATE_NAME,
+    CONF_CLIMATE_PRIORITY,
+    CONF_CLIMATE_TARGET_TEMPERATURE,
+    CONF_CLIMATE_WATTAGE,
+    CONF_CLIMATE_POWER_SENSOR,
+    CONF_CLIMATE_USE_ESTIMATED_POWER,
+    CONF_CLIMATE_WINDOW_SENSORS,
+    DEFAULT_CLIMATE_HVAC_MODE,
+    DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DOMAIN,
-    DEFAULT_CONTROLLER_HVAC_MODE,
-    DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
-    ENTITY_SMART_CONTROLLER,
-    CONF_SOLAR_FORECAST_SENSOR,
-    CONF_SOLAR_PRODUCTION_SENSOR,
-    CONF_NET_EXPORT_SENSOR,
+    PRESET_ACTIVE,
+    PRESET_INACTIVE,
 )
 from .coordinator import SmartAircoCoordinator
 
@@ -44,404 +51,256 @@ async def async_setup_entry(
     """Set up Smart Airco climate entities from a config entry."""
     coordinator: SmartAircoCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    # Create the main smart controller entity
-    entities = [SmartAircoClimateEntity(coordinator, config_entry)]
+    entities = [
+        SmartAircoManagedClimateEntity(coordinator, config_entry, climate_config)
+        for climate_config in coordinator.climate_entities
+        if isinstance(climate_config.get(CONF_CLIMATE_ENTITY_ID), str)
+    ]
 
     async_add_entities(entities)
 
 
-class SmartAircoClimateEntity(CoordinatorEntity, ClimateEntity):
-    """Smart Airco Climate Controller Entity."""
+class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
+    """Smart Airco companion climate entity for one managed climate."""
 
     def __init__(
-        self, coordinator: SmartAircoCoordinator, config_entry: ConfigEntry
+        self,
+        coordinator: SmartAircoCoordinator,
+        config_entry: ConfigEntry,
+        climate_config: dict[str, Any],
     ) -> None:
-        """Initialize the Smart Airco climate entity."""
         super().__init__(coordinator)
         self.coordinator: SmartAircoCoordinator = coordinator
         self.config_entry = config_entry
-        title = config_entry.title if hasattr(config_entry, "title") else "Smart Airco"
-        self._attr_name = f"{title} Controller"
-        self._attr_unique_id = f"{config_entry.entry_id}_{ENTITY_SMART_CONTROLLER}"
-
-        # Climate entity configuration
+        self._source_entity_id = climate_config[CONF_CLIMATE_ENTITY_ID]
+        base_name = climate_config.get(
+            CONF_CLIMATE_NAME,
+            self._source_entity_id.split(".")[-1].replace("_", " ").title(),
+        )
+        self._attr_name = f"{base_name} Smart Airco"
+        self._attr_unique_id = f"{config_entry.entry_id}_{self._source_entity_id.replace('.', '_')}_smart_airco"
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         self._attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL, HVACMode.HEAT]
+        self._attr_preset_modes = [PRESET_ACTIVE, PRESET_INACTIVE]
         self._attr_supported_features = (
             ClimateEntityFeature.TURN_ON
             | ClimateEntityFeature.TURN_OFF
             | ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.PRESET_MODE
         )
         self._attr_target_temperature_step = 0.5
-        self._controller_mode = config_entry.data.get(
-            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
-        )
-        self._enabled = config_entry.data.get(CONF_CONTROLLER_ENABLED, True)
 
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self.coordinator.last_update_success
 
+    def _config(self) -> dict[str, Any]:
+        for climate_config in self.coordinator.config.get(CONF_CLIMATE_ENTITIES, []):
+            if climate_config.get(CONF_CLIMATE_ENTITY_ID) == self._source_entity_id:
+                return climate_config
+        return {CONF_CLIMATE_ENTITY_ID: self._source_entity_id}
+
+    def _runtime(self) -> dict[str, Any]:
+        sensors = (
+            self.coordinator.data.get("sensors", {}) if self.coordinator.data else {}
+        )
+        return sensors.get("climate_entities", {}).get(self._source_entity_id, {})
+
+    def _desired_hvac_mode(self) -> str:
+        return self._config().get(CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE)
+
+    def _active(self) -> bool:
+        return self._config().get(CONF_CLIMATE_ENABLED, True)
+
     @property
     def hvac_mode(self) -> HVACMode:
-        """Return current HVAC mode."""
-        return self._controller_mode if self._enabled else HVACMode.OFF
+        """Return desired Smart Airco HVAC mode for this climate."""
+        return self._desired_hvac_mode() if self._active() else HVACMode.OFF
+
+    @property
+    def preset_mode(self) -> str | None:
+        """Return Smart Airco participation state."""
+        return PRESET_ACTIVE if self._active() else PRESET_INACTIVE
 
     @property
     def hvac_action(self) -> str | None:
-        """Return current HVAC action."""
-        if not self._enabled:
+        """Return current Smart Airco action for this climate."""
+        if not self._active():
             return HVACAction.OFF
 
-        if not self.coordinator.data:
-            return HVACAction.IDLE
-
-        sensor_data = self.coordinator.data.get("sensors", {})
-        climate_entities = sensor_data.get("climate_entities", {})
-
-        running_count = sum(
-            1
-            for climate in climate_entities.values()
-            if climate.get("state") == self._controller_mode
-        )
-
-        if running_count > 0:
+        runtime = self._runtime()
+        current_state = runtime.get("state")
+        desired_mode = self._desired_hvac_mode()
+        if current_state == desired_mode:
             return (
                 HVACAction.HEATING
-                if self._controller_mode == HVACMode.HEAT
+                if desired_mode == HVACMode.HEAT
                 else HVACAction.COOLING
             )
         return HVACAction.IDLE
 
     @property
     def current_temperature(self) -> float | None:
-        """Return current temperature (average of all climate entities)."""
-        if not self.coordinator.data:
+        """Return current temperature from the underlying climate."""
+        climate_state = self.coordinator.hass.states.get(self._source_entity_id)
+        if climate_state is None:
             return None
-
-        temperatures = []
-        for entity_id in self._controller_selected_entity_ids():
-            # Get temperature from the actual climate entity
-            climate_state = self.coordinator.hass.states.get(entity_id)
-            if climate_state and climate_state.attributes.get("current_temperature"):
-                try:
-                    temp = float(climate_state.attributes["current_temperature"])
-                    temperatures.append(temp)
-                except (ValueError, TypeError):
-                    continue
-
-        return sum(temperatures) / len(temperatures) if temperatures else None
+        try:
+            value = climate_state.attributes.get("current_temperature")
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
+            return None
 
     @property
     def target_temperature(self) -> float | None:
-        """Return target temperature (average of all climate entities)."""
-        configured_target = self.config_entry.data.get(
-            CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CONTROLLER_TARGET_TEMPERATURE
+        """Return Smart Airco target temperature for this climate."""
+        configured = self._config().get(
+            CONF_CLIMATE_TARGET_TEMPERATURE, DEFAULT_CLIMATE_TARGET_TEMPERATURE
         )
-        if configured_target is not None:
+        if configured is not None:
             try:
-                return float(configured_target)
+                return float(configured)
             except (TypeError, ValueError):
                 return None
 
-        temperatures = []
-        for entity_id in self._controller_selected_entity_ids():
-            # Get target temperature from the actual climate entity
-            climate_state = self.coordinator.hass.states.get(entity_id)
-            if climate_state and climate_state.attributes.get("temperature"):
-                try:
-                    temp = float(climate_state.attributes["temperature"])
-                    temperatures.append(temp)
-                except (ValueError, TypeError):
-                    continue
-
-        return sum(temperatures) / len(temperatures) if temperatures else None
+        climate_state = self.coordinator.hass.states.get(self._source_entity_id)
+        if climate_state is None:
+            return None
+        try:
+            value = climate_state.attributes.get("temperature")
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
+            return None
 
     @property
     def min_temp(self) -> float:
-        """Return the minimum supported controller temperature."""
-        min_values = []
-        for entity_id in self._controller_selected_entity_ids():
-            climate_state = self.coordinator.hass.states.get(entity_id)
-            if climate_state is None:
-                continue
-            try:
-                min_values.append(float(climate_state.attributes.get("min_temp", 16.0)))
-            except (TypeError, ValueError):
-                continue
-        return min(min_values) if min_values else 10.0
+        """Return min temperature based on the underlying climate."""
+        climate_state = self.coordinator.hass.states.get(self._source_entity_id)
+        if climate_state is None:
+            return 10.0
+        try:
+            return float(climate_state.attributes.get("min_temp", 10.0))
+        except (TypeError, ValueError):
+            return 10.0
 
     @property
     def max_temp(self) -> float:
-        """Return the maximum supported controller temperature."""
-        max_values = []
-        for entity_id in self._controller_selected_entity_ids():
-            climate_state = self.coordinator.hass.states.get(entity_id)
-            if climate_state is None:
-                continue
-            try:
-                max_values.append(float(climate_state.attributes.get("max_temp", 35.0)))
-            except (TypeError, ValueError):
-                continue
-        return max(max_values) if max_values else 35.0
+        """Return max temperature based on the underlying climate."""
+        climate_state = self.coordinator.hass.states.get(self._source_entity_id)
+        if climate_state is None:
+            return 35.0
+        try:
+            return float(climate_state.attributes.get("max_temp", 35.0))
+        except (TypeError, ValueError):
+            return 35.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return extra state attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        sensors = self.coordinator.data.get("sensors", {})
-        calculations = self.coordinator.data.get("calculations", {})
-        decisions = self.coordinator.data.get("decisions", {})
-        climate_entities = sensors.get("climate_entities", {})
-        raw_update_interval = self.coordinator.config.get("update_interval", 300)
-        update_interval_seconds = (
-            int(raw_update_interval.total_seconds())
-            if hasattr(raw_update_interval, "total_seconds")
-            else int(raw_update_interval)
+        """Return Smart Airco specific attributes for this climate."""
+        config = self._config()
+        runtime = self._runtime()
+        decisions = (
+            self.coordinator.data.get("decisions", {}) if self.coordinator.data else {}
         )
-
-        # Count climate entities by status
-        enabled_count = sum(
-            1 for c in climate_entities.values() if c.get("enabled", True)
+        decision = decisions.get("climate_decisions", {}).get(
+            self._source_entity_id, {}
         )
-        manual_override_count = sum(
-            1 for c in climate_entities.values() if c.get("manual_override", False)
-        )
-        running_count = sum(
-            1
-            for climate in climate_entities.values()
-            if climate.get("state") == self._controller_mode
-        )
-        available_count = sum(
-            1 for c in climate_entities.values() if c.get("can_run", False)
-        )
-
-        attributes = {
-            "smart_airco_controller": True,
+        return {
+            "smart_airco_managed": True,
             "smart_airco_entry_id": self.config_entry.entry_id,
-            # System status
-            "controller_enabled": self._enabled,
-            "controller_hvac_mode": self._controller_mode,
-            "controller_target_temperature": self.target_temperature,
-            "total_climate_entities": len(climate_entities),
-            "enabled_entities": enabled_count,
-            "manual_override_entities": manual_override_count,
-            "available_entities": available_count,
-            "running_entities": running_count,
-            # Energy data
-            "solar_forecast": sensors.get("forecast_power", 0),
-            "solar_production": sensors.get("current_production", 0),
-            "net_export": sensors.get("net_export", 0),
-            # Configured sensor entity IDs for UI logic
-            "forecast_sensor": self.coordinator.config.get(CONF_SOLAR_FORECAST_SENSOR),
-            "production_sensor": self.coordinator.config.get(
-                CONF_SOLAR_PRODUCTION_SENSOR
-            ),
-            "net_export_sensor": self.coordinator.config.get(CONF_NET_EXPORT_SENSOR),
-            "predicted_surplus": calculations.get("predicted_surplus", 0),
-            "current_surplus": calculations.get("current_surplus", 0),
-            "total_ac_consumption": calculations.get("total_airco_consumption", 0),
-            "critical_inputs_valid": calculations.get("critical_inputs_valid", True),
-            "critical_input_errors": calculations.get("critical_input_errors", []),
-            # Update interval
-            "update_interval_seconds": update_interval_seconds,
-            "update_interval_minutes": int(update_interval_seconds / 60),
-            # Decision info
-            "decision_reason": decisions.get("reason", "unknown"),
-            "total_power_needed": decisions.get("total_power_needed", 0),
-            "last_update": self.coordinator.data.get("last_update"),
-            "configured_climate_entity_ids": sorted(climate_entities.keys()),
-            "managed_climates": [],
+            "source_entity_id": self._source_entity_id,
+            "smart_airco_active": self._active(),
+            "smart_airco_hvac_mode": self._desired_hvac_mode(),
+            "smart_airco_target_temperature": self.target_temperature,
+            "priority": config.get(CONF_CLIMATE_PRIORITY, 999),
+            "manual_override": config.get(CONF_CLIMATE_MANUAL_OVERRIDE, False),
+            "windows_open": runtime.get("windows_open", False),
+            "power_source": runtime.get("power_source", "unknown"),
+            "estimated_wattage": config.get(CONF_CLIMATE_WATTAGE, 0),
+            "power_sensor": config.get(CONF_CLIMATE_POWER_SENSOR),
+            "use_estimated_power": config.get(CONF_CLIMATE_USE_ESTIMATED_POWER, True),
+            "window_sensors": config.get(CONF_CLIMATE_WINDOW_SENSORS, []),
+            "decision_reason": decision.get("reason", "unknown"),
+            "should_run": decision.get("should_cool", False),
         }
 
-        # Add individual climate entity status
-        for entity_id, climate_data in climate_entities.items():
-            entity_name = climate_data.get("name", entity_id.split(".")[-1])
-            safe_name = entity_id.replace(".", "_").replace("-", "_")
+    async def _async_update_config(self, **updates: Any) -> None:
+        climate_entities = []
+        changed = False
 
-            decision = decisions.get("climate_decisions", {}).get(entity_id, {})
-            cfg = climate_data.get("config", {})
-            managed_climate = {
-                "name": entity_name,
-                "entity_id": entity_id,
-                "enabled": climate_data.get("enabled", True),
-                "state": climate_data.get("state", "unknown"),
-                "power": climate_data.get("current_power", 0),
-                "power_source": climate_data.get("power_source", "unknown"),
-                "manual_override": climate_data.get("manual_override", False),
-                "use_estimated_power": cfg.get("use_estimated_power", True),
-                "estimated_wattage": cfg.get("wattage", 0),
-                "power_sensor": cfg.get("power_sensor"),
-                "windows_open": climate_data.get("windows_open", False),
-                "window_sensors": cfg.get("window_sensors", []),
-                "should_cool": decision.get("should_cool", False),
-                "reason": decision.get("reason", "unknown"),
-                "priority": climate_data.get("priority", 999),
-            }
-            attributes["managed_climates"].append(managed_climate)
+        for climate_config in self.coordinator.config.get(CONF_CLIMATE_ENTITIES, []):
+            updated = dict(climate_config)
+            if updated.get(CONF_CLIMATE_ENTITY_ID) == self._source_entity_id:
+                updated.update(updates)
+                changed = True
+            climate_entities.append(updated)
 
-            attributes.update(
-                {
-                    f"{safe_name}_display_name": entity_name,
-                    f"{safe_name}_enabled": climate_data.get("enabled", True),
-                    f"{safe_name}_state": climate_data.get("state", "unknown"),
-                    f"{safe_name}_power": climate_data.get("current_power", 0),
-                    f"{safe_name}_power_source": climate_data.get(
-                        "power_source", "unknown"
-                    ),
-                    f"{safe_name}_manual_override": climate_data.get(
-                        "manual_override", False
-                    ),
-                    f"{safe_name}_use_estimated_power": cfg.get(
-                        "use_estimated_power", True
-                    ),
-                    f"{safe_name}_estimated_wattage": cfg.get("wattage", 0),
-                    f"{safe_name}_power_sensor": cfg.get("power_sensor"),
-                    f"{safe_name}_windows_open": climate_data.get(
-                        "windows_open", False
-                    ),
-                    f"{safe_name}_window_sensors": cfg.get("window_sensors", []),
-                    f"{safe_name}_should_cool": decision.get("should_cool", False),
-                    f"{safe_name}_reason": decision.get("reason", "unknown"),
-                    f"{safe_name}_priority": climate_data.get("priority", 999),
-                    f"{safe_name}_entity_id": entity_id,
-                }
-            )
+        if not changed:
+            return
 
-        return attributes
-
-    def _controller_selected_entity_ids(self) -> list[str]:
-        """Return climate entity IDs selected for controller management."""
-        climate_entities = self.coordinator.config.get("climate_entities", [])
-        selected_entity_ids = [
-            config.get("entity_id")
-            for config in climate_entities
-            if config.get("enabled", True) and isinstance(config.get("entity_id"), str)
-        ]
-        if selected_entity_ids:
-            return selected_entity_ids
-
-        return [
-            config.get("entity_id")
-            for config in climate_entities
-            if isinstance(config.get("entity_id"), str)
-        ]
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={**self.config_entry.data, CONF_CLIMATE_ENTITIES: climate_entities},
+        )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set HVAC mode."""
-        if hvac_mode in (HVACMode.COOL, HVACMode.HEAT):
-            self._enabled = True
-            self._controller_mode = hvac_mode
-            self.coordinator.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data={
-                    **self.config_entry.data,
-                    CONF_CONTROLLER_ENABLED: True,
-                    CONF_CONTROLLER_HVAC_MODE: hvac_mode,
-                },
-            )
-            _LOGGER.info("Smart Airco Controller enabled in %s mode", hvac_mode)
-            # Trigger immediate evaluation
-            await self.coordinator.async_request_refresh()
-        elif hvac_mode == HVACMode.OFF:
-            self._enabled = False
-            self.coordinator.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data={
-                    **self.config_entry.data,
-                    CONF_CONTROLLER_ENABLED: False,
-                    CONF_CONTROLLER_HVAC_MODE: self._controller_mode,
-                },
-            )
-            _LOGGER.info("Smart Airco Controller disabled")
-            # Turn off all managed ACs
-            await self._turn_off_all_acs()
+        """Set Smart Airco desired HVAC mode for this climate."""
+        if hvac_mode == HVACMode.OFF:
+            await self.async_set_preset_mode(PRESET_INACTIVE)
+            return
 
+        if hvac_mode not in (HVACMode.COOL, HVACMode.HEAT):
+            return
+
+        await self._async_update_config(
+            **{CONF_CLIMATE_ENABLED: True, CONF_CLIMATE_HVAC_MODE: hvac_mode}
+        )
+        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set Smart Airco participation state for this climate."""
+        if preset_mode not in (PRESET_ACTIVE, PRESET_INACTIVE):
+            return
+
+        enabled = preset_mode == PRESET_ACTIVE
+        await self._async_update_config(
+            **{CONF_CLIMATE_ENABLED: enabled, CONF_CLIMATE_MANUAL_OVERRIDE: False}
+        )
+        if not enabled:
+            await self.coordinator.async_set_climate_mode(
+                self._source_entity_id,
+                HVACMode.OFF,
+                track_for_antichatter=False,
+            )
+        await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set the shared controller target temperature."""
+        """Set Smart Airco target temperature for this climate."""
         if ATTR_TEMPERATURE not in kwargs:
             return
-
         try:
             temperature = float(kwargs[ATTR_TEMPERATURE])
         except (TypeError, ValueError):
             return
 
-        self.coordinator.hass.config_entries.async_update_entry(
-            self.config_entry,
-            data={
-                **self.config_entry.data,
-                CONF_CONTROLLER_ENABLED: self._enabled,
-                CONF_CONTROLLER_HVAC_MODE: self._controller_mode,
-                CONF_CONTROLLER_TARGET_TEMPERATURE: temperature,
-            },
+        await self._async_update_config(
+            **{CONF_CLIMATE_TARGET_TEMPERATURE: temperature}
         )
-
-        if self.coordinator.data:
-            sensor_data = self.coordinator.data.get("sensors", {})
-            climate_entities = sensor_data.get("climate_entities", {})
-            for entity_id in self._controller_selected_entity_ids():
-                climate_data = climate_entities.get(entity_id, {})
-                if climate_data.get("state") == self._controller_mode:
-                    await self.coordinator.async_set_climate_temperature(
-                        entity_id, temperature
-                    )
-
+        runtime = self._runtime()
+        if self._active() and runtime.get("state") == self._desired_hvac_mode():
+            await self.coordinator.async_set_climate_temperature(
+                self._source_entity_id, temperature
+            )
+        await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
-        """Turn on the Smart Airco controller."""
-        await self.async_set_hvac_mode(self._controller_mode)
+        """Turn on Smart Airco participation for this climate."""
+        await self.async_set_preset_mode(PRESET_ACTIVE)
 
     async def async_turn_off(self) -> None:
-        """Turn off the Smart Airco controller."""
-        await self.async_set_hvac_mode(HVACMode.OFF)
-
-    async def _turn_off_all_acs(self) -> None:
-        """Turn off all managed AC units."""
-        if not self.coordinator.data:
-            return
-
-        sensor_data = self.coordinator.data.get("sensors", {})
-        climate_entities = sensor_data.get("climate_entities", {})
-
-        for entity_id, climate_data in climate_entities.items():
-            if climate_data.get("state") not in ("off", "unknown"):
-                _LOGGER.info("Turning off %s (controller disabled)", entity_id)
-                await self.coordinator.async_set_climate_mode(
-                    entity_id,
-                    "off",
-                    track_for_antichatter=False,
-                )
-
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to hass."""
-        await super().async_added_to_hass()
-
-        # Start automatic execution of decisions
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self._handle_coordinator_update)
-        )
-
-    def _handle_coordinator_update(self) -> None:
-        """Handle coordinator updates and execute decisions if enabled.
-
-        Note: Coordinator listeners are synchronous callbacks. Schedule any
-        async work on the Home Assistant loop instead of awaiting here.
-        """
-        self._controller_mode = self.config_entry.data.get(
-            CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
-        )
-
-        if self._enabled and self.coordinator.data:
-            # Schedule execution of decisions without blocking the callback
-            self.coordinator.hass.async_create_task(
-                self.coordinator.async_execute_decisions()
-            )
-
-        self.async_write_ha_state()
+        """Turn off Smart Airco participation for this climate."""
+        await self.async_set_preset_mode(PRESET_INACTIVE)

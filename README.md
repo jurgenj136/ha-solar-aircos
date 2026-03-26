@@ -14,14 +14,13 @@ sensors.
 - Prioritizes rooms when there is not enough surplus for every unit.
 - Supports optional per-AC power sensors or estimated wattage.
 - Supports optional window and door sensors per AC.
-- Exposes a controller climate plus supporting sensors and services.
+- Exposes one Smart Airco climate entity per managed climate plus supporting sensors and services.
 - Uses a panel-first native Home Assistant sidebar for day-to-day setup and editing.
 - Includes basic anti-chatter behavior with startup hysteresis and minimum run
   and off times.
-- Lets the Smart Airco Controller run managed climates in either `cool` or
-  `heat` mode.
-- Lets the Smart Airco Controller apply one shared target temperature to the
-  climates it is currently allowed to control.
+- Lets each managed Smart Airco climate choose its own `cool` / `heat` mode.
+- Lets each managed Smart Airco climate choose its own target temperature.
+- Lets each managed Smart Airco climate opt in or out of Smart Airco control.
 
 ## Current product shape
 
@@ -106,8 +105,6 @@ happens in the sidebar panel.
 
 Configure:
 
-- controller mode (`cool` or `heat`),
-- shared controller target temperature,
 - forecast sensor,
 - solar production sensor,
 - net export sensor,
@@ -119,6 +116,9 @@ For each managed AC, configure:
 
 - target `climate` entity,
 - display name,
+- Smart Airco active state,
+- Smart Airco mode (`cool` or `heat`),
+- Smart Airco target temperature,
 - priority,
 - whether power comes from a live sensor or an estimate,
 - estimated wattage if needed,
@@ -144,7 +144,7 @@ Current behavior:
 
 Expected entities include:
 
-- a Smart Airco controller climate entity,
+- one Smart Airco climate entity per managed climate,
 - surplus and status sensors,
 - per-AC monitoring sensors.
 

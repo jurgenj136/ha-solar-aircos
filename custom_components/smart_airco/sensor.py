@@ -18,16 +18,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE, DOMAIN
+from .const import CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE, DOMAIN
 from .coordinator import SmartAircoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _controller_hvac_mode(coordinator: SmartAircoCoordinator) -> str:
-    """Return the configured Smart Airco run mode."""
-    return coordinator.config.get(
-        CONF_CONTROLLER_HVAC_MODE, DEFAULT_CONTROLLER_HVAC_MODE
+def _desired_hvac_mode(
+    climate_data: dict[str, Any], climate_config: dict[str, Any]
+) -> str:
+    """Return desired Smart Airco run mode for one climate."""
+    return climate_data.get(
+        "desired_hvac_mode",
+        climate_config.get(CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE),
     )
 
 
@@ -193,12 +196,13 @@ class SmartAircoTotalConsumptionSensor(SmartAircoBaseSensor):
 
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
-        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         # Count running ACs and their power
         running_acs = []
         for entity_id, climate_data in climate_entities.items():
-            if climate_data.get("state") == controller_hvac_mode:
+            if climate_data.get("state") == climate_data.get(
+                "desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE
+            ):
                 running_acs.append(
                     {
                         "entity_id": entity_id,
@@ -233,12 +237,12 @@ class SmartAircoRunningCountSensor(SmartAircoBaseSensor):
 
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
-        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
 
         return sum(
             1
             for climate in climate_entities.values()
-            if climate.get("state") == controller_hvac_mode
+            if climate.get("state")
+            == climate.get("desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE)
         )
 
     @property
@@ -287,10 +291,76 @@ class SmartAircoSystemStatusSensor(SmartAircoBaseSensor):
             return {}
 
         decisions = self.coordinator.data.get("decisions", {})
+        sensors = self.coordinator.data.get("sensors", {})
+        calculations = self.coordinator.data.get("calculations", {})
+        climate_entities = sensors.get("climate_entities", {})
+        managed_climates = []
+        for entity_id, climate_data in climate_entities.items():
+            config = climate_data.get("config", {})
+            managed_climates.append(
+                {
+                    "name": climate_data.get("name", entity_id),
+                    "entity_id": entity_id,
+                    "enabled": climate_data.get("enabled", True),
+                    "state": climate_data.get("state", "unknown"),
+                    "power": climate_data.get("current_power", 0),
+                    "power_source": climate_data.get("power_source", "unknown"),
+                    "manual_override": climate_data.get("manual_override", False),
+                    "use_estimated_power": config.get("use_estimated_power", True),
+                    "estimated_wattage": config.get("wattage", 0),
+                    "power_sensor": config.get("power_sensor"),
+                    "windows_open": climate_data.get("windows_open", False),
+                    "window_sensors": config.get("window_sensors", []),
+                    "should_cool": decisions.get("climate_decisions", {})
+                    .get(entity_id, {})
+                    .get("should_cool", False),
+                    "reason": decisions.get("climate_decisions", {})
+                    .get(entity_id, {})
+                    .get("reason", "unknown"),
+                    "priority": climate_data.get("priority", 999),
+                    "smart_airco_hvac_mode": climate_data.get(
+                        "desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE
+                    ),
+                    "smart_airco_target_temperature": climate_data.get(
+                        "target_temperature"
+                    ),
+                }
+            )
         return {
+            "smart_airco_panel_anchor": True,
+            "smart_airco_entry_id": self.config_entry.entry_id,
+            "forecast_sensor": self.coordinator.config.get("solar_forecast_sensor"),
+            "production_sensor": self.coordinator.config.get("solar_production_sensor"),
+            "net_export_sensor": self.coordinator.config.get("net_export_sensor"),
+            "predicted_surplus": calculations.get("predicted_surplus", 0),
+            "current_surplus": calculations.get("current_surplus", 0),
+            "critical_inputs_valid": calculations.get("critical_inputs_valid", True),
+            "running_entities": sum(
+                1
+                for climate in climate_entities.values()
+                if climate.get("state")
+                == climate.get("desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE)
+            ),
+            "manual_override_entities": sum(
+                1
+                for climate in climate_entities.values()
+                if climate.get("manual_override", False)
+            ),
             "available_surplus": decisions.get("available_surplus", 0),
             "total_power_needed": decisions.get("total_power_needed", 0),
             "critical_input_errors": decisions.get("critical_input_errors", []),
+            "update_interval_seconds": int(
+                self.coordinator.update_interval.total_seconds()
+            )
+            if self.coordinator.update_interval
+            else 300,
+            "update_interval_minutes": int(
+                self.coordinator.update_interval.total_seconds() / 60
+            )
+            if self.coordinator.update_interval
+            else 5,
+            "configured_climate_entity_ids": sorted(climate_entities.keys()),
+            "managed_climates": managed_climates,
             "last_update": self.coordinator.data.get("last_update"),
         }
 
@@ -330,10 +400,10 @@ class SmartAircoClimatePowerSensor(SmartAircoBaseSensor):
         sensors = self.coordinator.data.get("sensors", {})
         climate_entities = sensors.get("climate_entities", {})
         climate_data = climate_entities.get(entity_id, {})
-        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
+        desired_hvac_mode = _desired_hvac_mode(climate_data, self.climate_config)
 
         # Return actual power only if AC is running
-        if climate_data.get("state") == controller_hvac_mode:
+        if climate_data.get("state") == desired_hvac_mode:
             return climate_data.get("current_power", 0)
         return 0
 
@@ -352,12 +422,12 @@ class SmartAircoClimatePowerSensor(SmartAircoBaseSensor):
 
         decisions = self.coordinator.data.get("decisions", {})
         climate_decision = decisions.get("climate_decisions", {}).get(entity_id, {})
-        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
+        desired_hvac_mode = _desired_hvac_mode(climate_data, self.climate_config)
 
         return {
             "entity_id": entity_id,
             "state": climate_data.get("state", "unknown"),
-            "controller_hvac_mode": controller_hvac_mode,
+            "smart_airco_hvac_mode": desired_hvac_mode,
             "power_source": climate_data.get("power_source", "unknown"),
             "estimated_power": self.climate_config.get("wattage", 0),
             "priority": climate_data.get("priority", 999),
@@ -400,10 +470,10 @@ class SmartAircoClimateStatusSensor(SmartAircoBaseSensor):
         climate_data = climate_entities.get(entity_id, {})
         decisions = self.coordinator.data.get("decisions", {})
         climate_decision = decisions.get("climate_decisions", {}).get(entity_id, {})
-        controller_hvac_mode = _controller_hvac_mode(self.coordinator)
+        desired_hvac_mode = _desired_hvac_mode(climate_data, self.climate_config)
 
-        if climate_data.get("state") == controller_hvac_mode:
-            return "heating" if controller_hvac_mode == "heat" else "cooling"
+        if climate_data.get("state") == desired_hvac_mode:
+            return "heating" if desired_hvac_mode == "heat" else "cooling"
         else:
             reason = climate_decision.get("reason", "unknown")
             if "windows_open" in reason:
