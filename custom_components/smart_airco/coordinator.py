@@ -457,8 +457,8 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
             climate_data["current_power"] = power_consumption
 
-            # Only count power if AC is currently running (cooling)
-            if climate_data["state"] == climate_data["desired_hvac_mode"]:
+            # Count power if AC is actually running (any active HVAC mode)
+            if climate_data["state"] not in ("off", "unknown", "unavailable"):
                 total_airco_consumption += power_consumption
 
             # Check window sensors
@@ -717,6 +717,12 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         else:
             decisions["reason"] = "insufficient_surplus"
 
+        # Two-pass allocation: first keep already-running ACs, then start new ones.
+        # This prevents a higher-priority off AC from stealing surplus from a
+        # lower-priority AC that is already running, which would cause cycling.
+        already_running: list[dict[str, Any]] = []
+        not_yet_running: list[dict[str, Any]] = []
+
         for climate in solar_based_climates:
             entity_id = climate["entity_id"]
             power_needed = climate["power"]
@@ -735,9 +741,6 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                     "power": power_needed,
                 }
                 running_power += power_needed
-                decisions["reason"] = (
-                    f"running_{len([d for d in decisions['climate_decisions'].values() if d['should_cool']])}_units"
-                )
                 continue
 
             min_off_remaining = self._minimum_off_time_remaining(
@@ -753,37 +756,28 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 }
                 continue
 
-            # Check if we have enough surplus for this AC
             if current_state == desired_hvac_mode:
-                can_run = (
-                    running_power + power_needed
-                    <= predicted_surplus + _SURPLUS_HYSTERESIS_WATTS
-                )
-                success_reason = (
-                    f"priority_{climate['priority']}_running_with_hysteresis"
-                )
+                already_running.append(climate)
             else:
-                can_run = (
-                    running_power + power_needed + _SURPLUS_HYSTERESIS_WATTS
-                    <= predicted_surplus
-                )
-                success_reason = (
-                    f"priority_{climate['priority']}_surplus_available_with_hysteresis"
-                )
+                not_yet_running.append(climate)
 
-            if can_run:
-                # We can run this AC
+        # Pass 1: confirm already-running ACs (with hysteresis leniency)
+        for climate in already_running:
+            entity_id = climate["entity_id"]
+            power_needed = climate["power"]
+
+            can_keep = (
+                running_power + power_needed
+                <= predicted_surplus + _SURPLUS_HYSTERESIS_WATTS
+            )
+            if can_keep:
                 decisions["climate_decisions"][entity_id] = {
                     "should_cool": True,
-                    "reason": success_reason,
+                    "reason": f"priority_{climate['priority']}_running_with_hysteresis",
                     "power": power_needed,
                 }
                 running_power += power_needed
-                decisions["reason"] = (
-                    f"running_{len([d for d in decisions['climate_decisions'].values() if d['should_cool']])}_units"
-                )
             else:
-                # Not enough surplus for this AC
                 decisions["climate_decisions"][entity_id] = {
                     "should_cool": False,
                     "reason": (
@@ -793,6 +787,40 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                     ),
                     "power": power_needed,
                 }
+
+        # Pass 2: start new ACs with remaining budget (stricter threshold)
+        for climate in not_yet_running:
+            entity_id = climate["entity_id"]
+            power_needed = climate["power"]
+
+            can_start = (
+                running_power + power_needed + _SURPLUS_HYSTERESIS_WATTS
+                <= predicted_surplus
+            )
+            if can_start:
+                decisions["climate_decisions"][entity_id] = {
+                    "should_cool": True,
+                    "reason": f"priority_{climate['priority']}_surplus_available_with_hysteresis",
+                    "power": power_needed,
+                }
+                running_power += power_needed
+            else:
+                decisions["climate_decisions"][entity_id] = {
+                    "should_cool": False,
+                    "reason": (
+                        "insufficient_surplus_"
+                        f"need_{power_needed}W_have_{predicted_surplus - running_power}W_"
+                        f"hysteresis_{_SURPLUS_HYSTERESIS_WATTS}W"
+                    ),
+                    "power": power_needed,
+                }
+
+        # Update the overall reason
+        running_count = sum(
+            1 for d in decisions["climate_decisions"].values() if d["should_cool"]
+        )
+        if running_count > 0:
+            decisions["reason"] = f"running_{running_count}_units"
 
         # Set decisions for climate entities that cannot run
         for entity_id, climate_data in climate_entities.items():
