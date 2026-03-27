@@ -8,6 +8,7 @@ from homeassistant.const import ATTR_TEMPERATURE
 
 from custom_components.smart_airco.climate import SmartAircoManagedClimateEntity
 from custom_components.smart_airco.const import (
+    ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED,
     CONF_CLIMATE_ENABLED,
     CONF_CLIMATE_ENTITIES,
     CONF_CLIMATE_HVAC_MODE,
@@ -35,12 +36,31 @@ def test_managed_climate_basic_properties(hass, mock_config_entry, seed_states) 
     entity = _entity(coordinator, mock_config_entry, 0)
 
     assert entity.hvac_mode == HVACMode.COOL
-    assert entity.hvac_modes == ["auto", "heat", "cool", "dry", "fan_only"]
+    assert entity.hvac_modes == [
+        HVACMode.OFF,
+        HVACMode.AUTO,
+        HVACMode.HEAT,
+        HVACMode.COOL,
+        HVACMode.DRY,
+        HVACMode.FAN_ONLY,
+    ]
     assert entity.preset_mode == PRESET_SOLAR_BASED
     assert entity.current_temperature == pytest.approx(24.0)
     assert entity.target_temperature == pytest.approx(21.0)
     assert entity.min_temp == pytest.approx(10.0)
     assert entity.max_temp == pytest.approx(35.0)
+
+
+def test_managed_climate_reports_off_hvac_mode_when_preset_off(
+    hass, mock_config_entry, seed_states
+) -> None:
+    mock_config_entry.data[CONF_CLIMATE_ENTITIES][0][CONF_CLIMATE_PRESET_MODE] = (
+        PRESET_OFF
+    )
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    entity = _entity(coordinator, mock_config_entry, 0)
+
+    assert entity.hvac_mode == HVACMode.OFF
 
 
 def test_managed_climate_hvac_action_reflects_desired_mode(
@@ -229,4 +249,5 @@ def test_extra_state_attributes_expose_smart_airco_fields(
     assert attrs["smart_airco_preset_mode"] == PRESET_SOLAR_BASED
     assert attrs["smart_airco_hvac_mode"] == HVACMode.COOL
     assert attrs["source_entity_id"] == "climate.living_room"
+    assert attrs[ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED] is True
     assert attrs["decision_reason"] == "priority_1"

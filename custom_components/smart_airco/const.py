@@ -55,6 +55,15 @@ PRESET_OFF = "off"
 PRESET_ON = "on"
 PRESET_SOLAR_BASED = "solar_based"
 
+ATTR_SMART_AIRCO_MANAGED = "smart_airco_managed"
+ATTR_SMART_AIRCO_ENTRY_ID = "smart_airco_entry_id"
+ATTR_SMART_AIRCO_SOURCE_ENTITY_ID = "source_entity_id"
+ATTR_SMART_AIRCO_ACTIVE = "smart_airco_active"
+ATTR_SMART_AIRCO_PRESET_MODE = "smart_airco_preset_mode"
+ATTR_SMART_AIRCO_HVAC_MODE = "smart_airco_hvac_mode"
+ATTR_SMART_AIRCO_TARGET_TEMPERATURE = "smart_airco_target_temperature"
+ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED = "smart_airco_solar_automation_enabled"
+
 SMART_AIRCO_HVAC_MODES = tuple(mode.value for mode in HVACMode if mode != HVACMode.OFF)
 
 # Service names

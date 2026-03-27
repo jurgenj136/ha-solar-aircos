@@ -47,6 +47,7 @@ from .const import (
     SERVICE_SET_GLOBAL_SETTINGS,
 )
 from .coordinator import SmartAircoCoordinator
+from .homekit_patch import async_acquire_homekit_patch, async_release_homekit_patch
 from .panel import async_register_panel, async_unregister_panel
 
 _LOGGER = logging.getLogger(__name__)
@@ -145,36 +146,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     entry = await _async_migrate_entry_data(hass, entry)
+    async_acquire_homekit_patch(hass)
 
-    # Create the coordinator
-    coordinator = SmartAircoCoordinator(hass, entry)
+    try:
+        # Create the coordinator
+        coordinator = SmartAircoCoordinator(hass, entry)
 
-    # Fetch initial data so we have data when entities are added
-    await coordinator.async_config_entry_first_refresh()
+        # Fetch initial data so we have data when entities are added
+        await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = coordinator
-    entry.async_on_unload(coordinator.async_setup_manual_override_tracking())
-    entry.async_on_unload(
-        coordinator.async_add_listener(
-            lambda: hass.async_create_task(coordinator.async_execute_decisions())
+        hass.data[DOMAIN][entry.entry_id] = coordinator
+        entry.async_on_unload(coordinator.async_setup_manual_override_tracking())
+        entry.async_on_unload(
+            coordinator.async_add_listener(
+                lambda: hass.async_create_task(coordinator.async_execute_decisions())
+            )
         )
-    )
 
-    # Set up all platforms for this config entry
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Set up all platforms for this config entry
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register native custom panel once for the domain
-    if register_panel:
-        try:
-            await async_register_panel(hass)
-        except Exception:
-            _LOGGER.exception("Failed to register Smart Airco sidebar panel")
-            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-            hass.data[DOMAIN].pop(entry.entry_id, None)
-            return False
+        # Register native custom panel once for the domain
+        if register_panel:
+            try:
+                await async_register_panel(hass)
+            except Exception:
+                _LOGGER.exception("Failed to register Smart Airco sidebar panel")
+                await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+                hass.data[DOMAIN].pop(entry.entry_id, None)
+                async_release_homekit_patch(hass)
+                return False
 
-    # Register services
-    await _async_register_services(hass)
+        # Register services
+        await _async_register_services(hass)
+    except Exception:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        async_release_homekit_patch(hass)
+        raise
 
     return True
 
@@ -188,6 +196,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
+        async_release_homekit_patch(hass)
 
     # Unregister services if this is the last entry
     if not hass.data[DOMAIN]:

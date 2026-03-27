@@ -20,6 +20,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_SMART_AIRCO_ACTIVE,
+    ATTR_SMART_AIRCO_ENTRY_ID,
+    ATTR_SMART_AIRCO_HVAC_MODE,
+    ATTR_SMART_AIRCO_MANAGED,
+    ATTR_SMART_AIRCO_PRESET_MODE,
+    ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED,
+    ATTR_SMART_AIRCO_SOURCE_ENTITY_ID,
+    ATTR_SMART_AIRCO_TARGET_TEMPERATURE,
     CONF_CLIMATE_ENABLED,
     CONF_CLIMATE_ENTITIES,
     CONF_CLIMATE_ENTITY_ID,
@@ -84,9 +92,7 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
         self._attr_unique_id = f"{config_entry.entry_id}_{self._source_entity_id.replace('.', '_')}_smart_airco"
         self._attr_translation_key = "managed_climate"
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
-        self._attr_hvac_modes = self.coordinator.supported_hvac_modes(
-            self._source_entity_id
-        )
+        self._attr_hvac_modes = self._homeassistant_hvac_modes()
         self._attr_preset_modes = [PRESET_OFF, PRESET_ON, PRESET_SOLAR_BASED]
         self._attr_supported_features = (
             ClimateEntityFeature.TURN_ON
@@ -119,6 +125,12 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     def _supported_hvac_modes(self) -> list[str]:
         return self.coordinator.supported_hvac_modes(self._source_entity_id)
 
+    def _homeassistant_hvac_modes(self) -> list[HVACMode]:
+        return [
+            HVACMode.OFF,
+            *(HVACMode(mode) for mode in self._supported_hvac_modes()),
+        ]
+
     def _preset_mode(self) -> str:
         value = self._config().get(
             CONF_CLIMATE_PRESET_MODE, DEFAULT_CLIMATE_PRESET_MODE
@@ -131,12 +143,14 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         """Return desired Smart Airco HVAC mode for this climate."""
-        return self._desired_hvac_mode()
+        if self._preset_mode() == PRESET_OFF:
+            return HVACMode.OFF
+        return HVACMode(self._desired_hvac_mode())
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
         """Return supported Smart Airco HVAC modes for this climate."""
-        return self._supported_hvac_modes()
+        return self._homeassistant_hvac_modes()
 
     @property
     def preset_mode(self) -> str | None:
@@ -232,13 +246,16 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
             self._source_entity_id, {}
         )
         return {
-            "smart_airco_managed": True,
-            "smart_airco_entry_id": self.config_entry.entry_id,
-            "source_entity_id": self._source_entity_id,
-            "smart_airco_active": self._active(),
-            "smart_airco_preset_mode": self._preset_mode(),
-            "smart_airco_hvac_mode": self._desired_hvac_mode(),
-            "smart_airco_target_temperature": self.target_temperature,
+            ATTR_SMART_AIRCO_MANAGED: True,
+            ATTR_SMART_AIRCO_ENTRY_ID: self.config_entry.entry_id,
+            ATTR_SMART_AIRCO_SOURCE_ENTITY_ID: self._source_entity_id,
+            ATTR_SMART_AIRCO_ACTIVE: self._active(),
+            ATTR_SMART_AIRCO_PRESET_MODE: self._preset_mode(),
+            ATTR_SMART_AIRCO_HVAC_MODE: self._desired_hvac_mode(),
+            ATTR_SMART_AIRCO_TARGET_TEMPERATURE: self.target_temperature,
+            ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED: (
+                self._preset_mode() == PRESET_SOLAR_BASED
+            ),
             "supported_hvac_modes": self._supported_hvac_modes(),
             "priority": config.get(CONF_CLIMATE_PRIORITY, 999),
             "manual_override": config.get(CONF_CLIMATE_MANUAL_OVERRIDE, False),
