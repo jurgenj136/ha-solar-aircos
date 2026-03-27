@@ -135,6 +135,40 @@ async def test_set_hvac_mode_accepts_supported_non_off_modes(
 
 
 @pytest.mark.asyncio
+async def test_set_hvac_mode_turns_on_entity_when_preset_was_off(
+    hass, setup_integration
+) -> None:
+    setup_integration.data[CONF_CLIMATE_ENTITIES][0][CONF_CLIMATE_PRESET_MODE] = (
+        PRESET_OFF
+    )
+    setup_integration.data[CONF_CLIMATE_ENTITIES][0][CONF_CLIMATE_ENABLED] = False
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+    entity = _entity(coordinator, setup_integration, 0)
+
+    with (
+        patch.object(
+            coordinator, "async_set_climate_mode", AsyncMock()
+        ) as mock_set_mode,
+        patch.object(
+            coordinator, "async_set_climate_temperature", AsyncMock()
+        ) as mock_set_temp,
+        patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh,
+        patch.object(entity, "async_write_ha_state"),
+    ):
+        await entity.async_set_hvac_mode(HVACMode.HEAT)
+
+    updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
+    assert updated[CONF_CLIMATE_HVAC_MODE] == HVACMode.HEAT
+    assert updated[CONF_CLIMATE_PRESET_MODE] == PRESET_ON
+    assert updated[CONF_CLIMATE_ENABLED] is True
+    mock_set_mode.assert_awaited_once_with(
+        "climate.living_room", HVACMode.HEAT, track_for_antichatter=False
+    )
+    mock_set_temp.assert_awaited_once_with("climate.living_room", 21.0)
+    mock_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_turn_off_sets_preset_off_and_turns_off_underlying_climate(
     hass, setup_integration
 ) -> None:

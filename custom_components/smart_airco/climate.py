@@ -298,6 +298,10 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
             return
 
         await self._async_update_config(**{CONF_CLIMATE_HVAC_MODE: hvac_mode})
+        if self._preset_mode() == PRESET_OFF:
+            await self.async_set_preset_mode(PRESET_ON)
+            return
+
         if self._preset_mode() == PRESET_ON:
             await self.coordinator.async_set_climate_mode(
                 self._source_entity_id, hvac_mode
