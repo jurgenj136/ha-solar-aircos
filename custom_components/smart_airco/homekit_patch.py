@@ -8,8 +8,10 @@ from types import ModuleType
 from typing import Any
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_ACTION,
     ATTR_PRESET_MODE,
     DOMAIN as CLIMATE_DOMAIN,
+    HVACAction,
     HVACMode,
     SERVICE_SET_PRESET_MODE,
 )
@@ -65,6 +67,7 @@ def async_acquire_homekit_patch(hass: HomeAssistant) -> bool:
 
     patched_class = _build_smart_airco_homekit_thermostat(
         original_class,
+        thermostats_module,
         const_module,
         util_module,
     )
@@ -132,9 +135,11 @@ def _async_import_homekit_modules() -> (
 
 def _build_smart_airco_homekit_thermostat(
     original_class: type,
+    thermostats_module: ModuleType,
     const_module: ModuleType,
     util_module: ModuleType,
 ) -> type:
+    heat_cool_off = thermostats_module.HC_HEAT_COOL_OFF
     char_configured_name = const_module.CHAR_CONFIGURED_NAME
     char_name = const_module.CHAR_NAME
     char_on = const_module.CHAR_ON
@@ -181,10 +186,18 @@ def _build_smart_airco_homekit_thermostat(
                 value=_is_solar_automation_enabled(state),
                 setter_callback=self._set_solar_automation,
             )
+            if _should_present_thermostat_as_off(state):
+                self.char_target_heat_cool.set_value(heat_cool_off)
+                self.char_current_heat_cool.set_value(heat_cool_off)
 
         @callback
         def async_update_state(self, new_state: State) -> None:
             super().async_update_state(new_state)
+
+            if _should_present_thermostat_as_off(new_state):
+                self.char_target_heat_cool.set_value(heat_cool_off)
+                self.char_current_heat_cool.set_value(heat_cool_off)
+
             if self._char_solar is None:
                 return
 
@@ -233,6 +246,14 @@ def _is_solar_automation_enabled(state: State | None) -> bool:
         return enabled
 
     return state.attributes.get(ATTR_SMART_AIRCO_PRESET_MODE) == PRESET_SOLAR_BASED
+
+
+def _should_present_thermostat_as_off(state: State | None) -> bool:
+    if state is None or not _is_solar_automation_enabled(state):
+        return False
+
+    hvac_action = state.attributes.get(ATTR_HVAC_ACTION)
+    return hvac_action in (HVACAction.OFF, HVACAction.IDLE)
 
 
 def _manual_preset_mode(state: State | None) -> str:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.components.climate import ATTR_HVAC_ACTION, HVACAction
 
 from custom_components.smart_airco import async_setup_entry, async_unload_entry
 from custom_components.smart_airco.const import (
@@ -60,6 +61,8 @@ class _FakeThermostat:
             _FakeService("AccessoryInformation"),
             _FakeService("Thermostat"),
         ]
+        self.char_target_heat_cool = _FakeChar("TargetHeatingCoolingState", value=2)
+        self.char_current_heat_cool = _FakeChar("CurrentHeatingCoolingState", value=2)
 
     def add_preload_service(self, service_type, chars=None, unique_id=None):
         service = _FakeService(service_type)
@@ -72,11 +75,19 @@ class _FakeThermostat:
 
     def async_update_state(self, new_state) -> None:
         self.last_state = new_state
+        self.char_target_heat_cool.set_value(0 if new_state.state == "off" else 2)
+        hvac_action = new_state.attributes.get(ATTR_HVAC_ACTION)
+        self.char_current_heat_cool.set_value(
+            0 if hvac_action in (HVACAction.OFF, HVACAction.IDLE) else 2
+        )
 
 
 def _mock_homekit_modules(monkeypatch):
     accessories_module = SimpleNamespace(TYPES={"Thermostat": _FakeThermostat})
-    thermostats_module = SimpleNamespace(Thermostat=_FakeThermostat)
+    thermostats_module = SimpleNamespace(
+        Thermostat=_FakeThermostat,
+        HC_HEAT_COOL_OFF=0,
+    )
     const_module = SimpleNamespace(
         CHAR_CONFIGURED_NAME="ConfiguredName",
         CHAR_NAME="Name",
@@ -110,6 +121,7 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
             ATTR_SMART_AIRCO_MANAGED: True,
             ATTR_SMART_AIRCO_PRESET_MODE: PRESET_SOLAR_BASED,
             ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED: True,
+            ATTR_HVAC_ACTION: HVACAction.IDLE,
         },
     )
 
@@ -125,6 +137,8 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
     assert solar_service.unique_id == "smart_airco_solar"
     assert solar_service in accessory.services[1].linked_services
     assert solar_service.chars[const_module.CHAR_ON].value is True
+    assert accessory.char_target_heat_cool.value == 0
+    assert accessory.char_current_heat_cool.value == 0
 
     hass.states.async_set(
         entity_id,
@@ -133,6 +147,7 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
             ATTR_SMART_AIRCO_MANAGED: True,
             ATTR_SMART_AIRCO_PRESET_MODE: PRESET_OFF,
             ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED: False,
+            ATTR_HVAC_ACTION: HVACAction.OFF,
         },
     )
     accessory.async_update_state(hass.states.get(entity_id))
@@ -148,8 +163,11 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
             ATTR_SMART_AIRCO_MANAGED: True,
             ATTR_SMART_AIRCO_PRESET_MODE: PRESET_SOLAR_BASED,
             ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED: True,
+            ATTR_HVAC_ACTION: HVACAction.COOLING,
         },
     )
+    accessory.async_update_state(hass.states.get(entity_id))
+    assert accessory.char_target_heat_cool.value == 2
     accessory._char_solar.setter_callback(0)
     accessory._char_solar.setter_callback(1)
 
