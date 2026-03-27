@@ -261,7 +261,16 @@ def _manual_preset_mode(state: State | None) -> str:
         return PRESET_OFF
 
     preset_mode = state.attributes.get(ATTR_SMART_AIRCO_PRESET_MODE)
-    if isinstance(preset_mode, str):
-        return PRESET_ON if preset_mode != PRESET_OFF else PRESET_OFF
+    if preset_mode == PRESET_OFF:
+        return PRESET_OFF
 
-    return PRESET_OFF if state.state == HVACMode.OFF else PRESET_ON
+    hvac_action = state.attributes.get(ATTR_HVAC_ACTION)
+    if hvac_action in (
+        HVACAction.HEATING,
+        HVACAction.COOLING,
+        HVACAction.DRYING,
+        HVACAction.FAN,
+    ):
+        return PRESET_ON
+
+    return PRESET_OFF

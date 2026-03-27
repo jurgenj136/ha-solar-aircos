@@ -139,6 +139,8 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
     assert solar_service.chars[const_module.CHAR_ON].value is True
     assert accessory.char_target_heat_cool.value == 0
     assert accessory.char_current_heat_cool.value == 0
+    solar_service.chars[const_module.CHAR_ON].setter_callback(0)
+    assert accessory.calls[0][2]["preset_mode"] == PRESET_OFF
 
     hass.states.async_set(
         entity_id,
@@ -154,7 +156,7 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
 
     assert solar_service.chars[const_module.CHAR_ON].value is False
     solar_service.chars[const_module.CHAR_ON].setter_callback(0)
-    assert accessory.calls[0][2]["preset_mode"] == PRESET_OFF
+    assert accessory.calls[1][2]["preset_mode"] == PRESET_OFF
 
     hass.states.async_set(
         entity_id,
@@ -171,8 +173,8 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
     accessory._char_solar.setter_callback(0)
     accessory._char_solar.setter_callback(1)
 
-    assert accessory.calls[1][2]["preset_mode"] == PRESET_ON
-    assert accessory.calls[2][2]["preset_mode"] == PRESET_SOLAR_BASED
+    assert accessory.calls[2][2]["preset_mode"] == PRESET_ON
+    assert accessory.calls[3][2]["preset_mode"] == PRESET_SOLAR_BASED
 
     async_release_homekit_patch(hass)
     assert accessories_module.TYPES["Thermostat"] is _FakeThermostat
