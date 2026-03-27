@@ -79,3 +79,31 @@ async def test_setup_fails_if_panel_registration_fails(
 
     assert mock_config_entry.entry_id not in hass.data[DOMAIN]
     mock_unload_platforms.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_setup_executes_decisions_after_first_refresh(
+    hass, mock_config_entry, seed_states
+) -> None:
+    mock_config_entry.add_to_hass(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_forward_entry_setups", AsyncMock()),
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
+        patch.object(
+            SmartAircoCoordinator,
+            "async_config_entry_first_refresh",
+            AsyncMock(return_value=None),
+        ) as mock_first_refresh,
+        patch.object(
+            SmartAircoCoordinator,
+            "async_execute_decisions",
+            AsyncMock(return_value=None),
+        ) as mock_execute_decisions,
+        patch("custom_components.smart_airco.async_register_panel", AsyncMock()),
+        patch("custom_components.smart_airco.async_unregister_panel", AsyncMock()),
+    ):
+        assert await async_setup_entry(hass, mock_config_entry)
+
+    mock_first_refresh.assert_awaited_once()
+    mock_execute_decisions.assert_awaited_once()

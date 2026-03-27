@@ -140,10 +140,24 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     def _active(self) -> bool:
         return self._preset_mode() != PRESET_OFF
 
+    def _should_present_as_off(self) -> bool:
+        preset_mode = self._preset_mode()
+        if preset_mode == PRESET_OFF:
+            return True
+
+        if preset_mode != PRESET_SOLAR_BASED or not self.coordinator.data:
+            return False
+
+        decisions = self.coordinator.data.get("decisions", {})
+        decision = decisions.get("climate_decisions", {}).get(
+            self._source_entity_id, {}
+        )
+        return decision.get("should_cool") is False
+
     @property
     def hvac_mode(self) -> HVACMode:
         """Return desired Smart Airco HVAC mode for this climate."""
-        if self._preset_mode() == PRESET_OFF:
+        if self._should_present_as_off():
             return HVACMode.OFF
         return HVACMode(self._desired_hvac_mode())
 
@@ -160,14 +174,12 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
     @property
     def hvac_action(self) -> str | None:
         """Return current Smart Airco action for this climate."""
-        if not self._active():
+        if self._should_present_as_off():
             return HVACAction.OFF
 
         runtime = self._runtime()
         current_state = runtime.get("state")
         desired_mode = self._desired_hvac_mode()
-        if self._preset_mode() == PRESET_OFF:
-            return HVACAction.OFF
         if current_state == desired_mode:
             if desired_mode == HVACMode.HEAT:
                 return HVACAction.HEATING

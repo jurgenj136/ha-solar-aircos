@@ -98,6 +98,39 @@ def test_managed_climate_hvac_action_reflects_desired_mode(
     assert entity.hvac_action == HVACAction.IDLE
 
 
+def test_solar_based_climate_presents_as_off_when_decision_denies_running(
+    hass, mock_config_entry
+) -> None:
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    entity = _entity(coordinator, mock_config_entry, 0)
+
+    coordinator.data = {
+        "sensors": {
+            "climate_entities": {
+                "climate.living_room": {
+                    "state": HVACMode.OFF,
+                    "desired_hvac_mode": HVACMode.COOL,
+                }
+            }
+        },
+        "decisions": {
+            "climate_decisions": {
+                "climate.living_room": {
+                    "should_cool": False,
+                    "reason": "insufficient_surplus",
+                }
+            }
+        },
+    }
+
+    assert entity.preset_mode == PRESET_SOLAR_BASED
+    assert entity.hvac_mode == HVACMode.OFF
+    assert entity.hvac_action == HVACAction.OFF
+    assert (
+        entity.extra_state_attributes[ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED] is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_set_hvac_mode_updates_per_climate_preferences(
     hass, setup_integration

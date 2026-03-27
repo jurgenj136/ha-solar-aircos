@@ -154,6 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Fetch initial data so we have data when entities are added
         await coordinator.async_config_entry_first_refresh()
+        await coordinator.async_execute_decisions()
 
         hass.data[DOMAIN][entry.entry_id] = coordinator
         entry.async_on_unload(coordinator.async_setup_manual_override_tracking())
