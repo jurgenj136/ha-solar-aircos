@@ -1,0 +1,125 @@
+{
+  "entity": {
+    "climate": {
+      "managed_climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "name": "Mode",
+            "state": {
+              "off": "Uit",
+              "on": "Aan",
+              "solar_based": "Zonne-energie"
+            }
+          }
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Slimme airco-controller",
+        "description": "Configureer je slimme aircosysteem om airconditioning automatisch te regelen op basis van zonne-energieproductie.",
+        "data": {
+          "name": "Naam",
+          "solar_forecast_sensor": "Sensor voor zonneverwachting",
+          "solar_production_sensor": "Sensor voor huidige zonneproductie",
+          "net_export_sensor": "Sensor voor netto teruglevering aan het net",
+          "update_interval": "Update-interval (minuten)"
+        },
+        "data_description": {
+          "solar_forecast_sensor": "Sensor die een verwachting van het zonnevermogen geeft (bijvoorbeeld Solcast)",
+          "solar_production_sensor": "Sensor die de huidige productie van de zonnepanelen toont",
+          "net_export_sensor": "Sensor die het vermogen toont dat aan het net wordt teruggeleverd",
+          "update_interval": "Hoe vaak sensoren en beslissingen worden bijgewerkt"
+        }
+      },
+      "climate_list": {
+        "title": "Klimaat-entiteiten",
+        "description": "Beheer je airco-units. Je hebt momenteel {climate_count} klimaat-entiteiten geconfigureerd (maximaal {max_climates}).",
+        "data": {
+          "action": "Actie",
+          "climate_id": "Selecteer klimaat-entiteit"
+        },
+        "data_description": {
+          "action": "Kies wat je wilt doen",
+          "climate_id": "Selecteer een klimaat-entiteit om te bewerken of te verwijderen"
+        }
+      },
+      "climate_config": {
+        "title": "{editing} klimaat-entiteit",
+        "description": "{editing} klimaat-entiteit: {climate_name}",
+        "data": {
+          "entity_id": "Klimaat-entiteit",
+          "name": "Weergavenaam",
+          "priority": "Prioriteit (1 = hoogste)",
+          "use_estimated_power": "Geschat vermogen gebruiken",
+          "wattage": "Geschat stroomverbruik (watt)",
+          "power_sensor": "Realtime vermogenssensor (optioneel)",
+          "window_sensors": "Raam-/deursensoren (optioneel)",
+          "enabled": "Automatische regeling inschakelen"
+        },
+        "data_description": {
+          "entity_id": "De klimaat-entiteit die bestuurd wordt",
+          "name": "Vriendelijke naam voor deze airco-unit",
+          "priority": "Lagere nummers = hogere prioriteit wanneer het overschot beperkt is",
+          "use_estimated_power": "Gebruik geschat wattage of een realtime vermogenssensor",
+          "wattage": "Geschat stroomverbruik wanneer geen vermogenssensor beschikbaar is",
+          "power_sensor": "Sensor die het realtime stroomverbruik van deze airco-unit toont",
+          "window_sensors": "De airco draait niet wanneer een van deze sensoren open staat",
+          "enabled": "Of deze airco automatisch bestuurd moet worden"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Geselecteerde entiteit bestaat niet",
+      "entity_unavailable": "Geselecteerde entiteit is momenteel niet beschikbaar",
+      "not_climate_entity": "Geselecteerde entiteit is geen klimaatapparaat",
+      "already_configured": "Deze klimaat-entiteit is al geconfigureerd",
+      "priority_already_used": "Dit prioriteitsnummer is al in gebruik",
+      "window_sensor_not_found": "Een of meer raamsensoren bestaan niet",
+      "max_climate_entities_reached": "Maximum aantal klimaat-entiteiten bereikt",
+      "no_climate_entities": "Je moet minstens een klimaat-entiteit configureren",
+      "cannot_connect": "Kan geen verbinding maken met het apparaat",
+      "invalid_config": "Ongeldige configuratie opgegeven",
+      "unknown": "Er is een onverwachte fout opgetreden"
+    },
+    "abort": {
+      "already_configured": "Smart Airco is al geconfigureerd"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Airco-opties",
+        "description": "Kies wat je wilt configureren.",
+        "menu_options": {
+          "global_settings": "Algemene instellingen",
+          "manage_climates": "Klimaat-entiteiten beheren"
+        }
+      },
+      "global_settings": {
+        "title": "Algemene instellingen",
+        "description": "Werk de algemene instellingen van Smart Airco bij.",
+        "data": {
+          "solar_forecast_sensor": "Sensor voor zonneverwachting",
+          "solar_production_sensor": "Sensor voor huidige zonneproductie",
+          "net_export_sensor": "Sensor voor netto teruglevering aan het net",
+          "update_interval": "Update-interval (minuten)"
+        },
+        "data_description": {
+          "solar_forecast_sensor": "Sensor die een verwachting van het zonnevermogen geeft",
+          "solar_production_sensor": "Sensor die de huidige zonneproductie toont",
+          "net_export_sensor": "Sensor die het vermogen toont dat aan het net wordt teruggeleverd",
+          "update_interval": "Hoe vaak sensoren en beslissingen worden bijgewerkt"
+        }
+      },
+      "manage_climates": {
+        "title": "Klimaat-entiteiten beheren",
+        "description": "{info}",
+        "data": {},
+        "data_description": {}
+      }
+    }
+  }
+}

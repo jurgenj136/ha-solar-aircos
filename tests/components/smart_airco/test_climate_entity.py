@@ -35,6 +35,7 @@ def test_managed_climate_basic_properties(hass, mock_config_entry, seed_states) 
     entity = _entity(coordinator, mock_config_entry, 0)
 
     assert entity.hvac_mode == HVACMode.COOL
+    assert entity.hvac_modes == ["auto", "heat", "cool", "dry", "fan_only"]
     assert entity.preset_mode == PRESET_SOLAR_BASED
     assert entity.current_temperature == pytest.approx(24.0)
     assert entity.target_temperature == pytest.approx(21.0)
@@ -92,6 +93,24 @@ async def test_set_hvac_mode_updates_per_climate_preferences(
 
     updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
     assert updated[CONF_CLIMATE_HVAC_MODE] == HVACMode.HEAT
+    mock_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_hvac_mode_accepts_supported_non_off_modes(
+    hass, setup_integration
+) -> None:
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+    entity = _entity(coordinator, setup_integration, 0)
+
+    with (
+        patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh,
+        patch.object(entity, "async_write_ha_state"),
+    ):
+        await entity.async_set_hvac_mode(HVACMode.DRY)
+
+    updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
+    assert updated[CONF_CLIMATE_HVAC_MODE] == HVACMode.DRY
     mock_refresh.assert_awaited_once()
 
 

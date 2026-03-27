@@ -55,6 +55,8 @@ PRESET_OFF = "off"
 PRESET_ON = "on"
 PRESET_SOLAR_BASED = "solar_based"
 
+SMART_AIRCO_HVAC_MODES = tuple(mode.value for mode in HVACMode if mode != HVACMode.OFF)
+
 # Service names
 SERVICE_EVALUATE_CONDITIONS = "evaluate_conditions"
 SERVICE_FORCE_UPDATE = "force_update"

@@ -46,6 +46,7 @@ from .const import (
     PRESET_OFF,
     PRESET_ON,
     PRESET_SOLAR_BASED,
+    SMART_AIRCO_HVAC_MODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,8 +105,33 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
     def climate_hvac_mode(self, climate_config: Mapping[str, Any]) -> str:
         """Return the configured Smart Airco HVAC mode for one climate."""
+        entity_id = climate_config.get(CONF_CLIMATE_ENTITY_ID)
+        supported_modes = self.supported_hvac_modes(entity_id)
         value = climate_config.get(CONF_CLIMATE_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE)
-        return value if isinstance(value, str) else DEFAULT_CLIMATE_HVAC_MODE
+        if isinstance(value, str) and value in supported_modes:
+            return value
+        return supported_modes[0] if supported_modes else DEFAULT_CLIMATE_HVAC_MODE
+
+    def supported_hvac_modes(self, entity_id: Any) -> list[str]:
+        """Return supported non-off HVAC modes for a climate entity."""
+        if not isinstance(entity_id, str):
+            return [DEFAULT_CLIMATE_HVAC_MODE]
+
+        climate_state = self.hass.states.get(entity_id)
+        raw_modes = []
+        if climate_state is not None:
+            raw_modes = climate_state.attributes.get("hvac_modes") or []
+
+        supported_modes = [
+            mode
+            for mode in raw_modes
+            if isinstance(mode, str)
+            and mode in SMART_AIRCO_HVAC_MODES
+            and mode != HVACMode.OFF
+        ]
+        if supported_modes:
+            return supported_modes
+        return [DEFAULT_CLIMATE_HVAC_MODE]
 
     def climate_target_temperature(
         self, climate_config: Mapping[str, Any]
@@ -286,7 +312,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 else:
                     updated_config[CONF_CLIMATE_PRESET_MODE] = PRESET_ON
                     updated_config[CONF_CLIMATE_ENABLED] = True
-                    if new_state in (HVACMode.COOL, HVACMode.HEAT):
+                    if new_state in self.supported_hvac_modes(entity_id):
                         updated_config[CONF_CLIMATE_HVAC_MODE] = new_state
                     if target_temperature is not None:
                         updated_config[CONF_CLIMATE_TARGET_TEMPERATURE] = (
@@ -379,6 +405,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 "preset_mode": self.climate_preset_mode(climate_config),
                 "priority": climate_config.get(CONF_CLIMATE_PRIORITY, 999),
                 "name": climate_config.get(CONF_CLIMATE_NAME, entity_id),
+                "supported_hvac_modes": self.supported_hvac_modes(entity_id),
                 "desired_hvac_mode": self.climate_hvac_mode(climate_config),
                 "target_temperature": self.climate_target_temperature(climate_config),
             }

@@ -39,6 +39,19 @@ def _desired_hvac_mode(
     )
 
 
+def _hvac_status_value(hvac_mode: str) -> str:
+    """Return a status value for the active HVAC mode."""
+    if hvac_mode == "heat":
+        return "heating"
+    if hvac_mode == "cool":
+        return "cooling"
+    if hvac_mode == "dry":
+        return "drying"
+    if hvac_mode == "fan_only":
+        return "fan"
+    return hvac_mode or "running"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -326,6 +339,9 @@ class SmartAircoSystemStatusSensor(SmartAircoBaseSensor):
                     "smart_airco_hvac_mode": climate_data.get(
                         "desired_hvac_mode", DEFAULT_CLIMATE_HVAC_MODE
                     ),
+                    "supported_hvac_modes": climate_data.get(
+                        "supported_hvac_modes", []
+                    ),
                     "smart_airco_preset_mode": climate_data.get(
                         "preset_mode",
                         config.get(CONF_CLIMATE_PRESET_MODE, "solar_based"),
@@ -485,7 +501,7 @@ class SmartAircoClimateStatusSensor(SmartAircoBaseSensor):
         desired_hvac_mode = _desired_hvac_mode(climate_data, self.climate_config)
 
         if climate_data.get("state") == desired_hvac_mode:
-            return "heating" if desired_hvac_mode == "heat" else "cooling"
+            return _hvac_status_value(desired_hvac_mode)
         else:
             reason = climate_decision.get("reason", "unknown")
             if "windows_open" in reason:

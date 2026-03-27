@@ -68,6 +68,24 @@ async def test_fetch_sensor_data_marks_windows_open_and_cannot_run(
 
 
 @pytest.mark.asyncio
+async def test_fetch_sensor_data_exposes_supported_modes_and_filters_off(
+    hass, mock_config_entry, seed_states
+) -> None:
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+
+    data = await coordinator._fetch_sensor_data()
+
+    living_room = data["climate_entities"]["climate.living_room"]
+    assert living_room["supported_hvac_modes"] == [
+        "auto",
+        "heat",
+        "cool",
+        "dry",
+        "fan_only",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_calculate_energy_data_and_priority_decisions(
     hass, mock_config_entry, seed_states
 ) -> None:
@@ -436,6 +454,31 @@ async def test_manual_override_disables_automation_for_changed_ac(
     assert bedroom[CONF_CLIMATE_HVAC_MODE] == "cool"
     assert bedroom[CONF_CLIMATE_MANUAL_OVERRIDE] is True
     reload_mock.assert_awaited_with(setup_integration.entry_id)
+
+
+@pytest.mark.asyncio
+async def test_manual_override_tracks_supported_non_off_mode(
+    hass, setup_integration
+) -> None:
+    hass.states.async_set(
+        "climate.living_room",
+        "dry",
+        {
+            "current_temperature": 24.0,
+            "temperature": 21.0,
+            "hvac_modes": ["off", "auto", "heat", "cool", "dry", "fan_only"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    living_room = next(
+        c
+        for c in setup_integration.data["climate_entities"]
+        if c["entity_id"] == "climate.living_room"
+    )
+    assert living_room[CONF_CLIMATE_PRESET_MODE] == PRESET_ON
+    assert living_room[CONF_CLIMATE_HVAC_MODE] == "dry"
+    assert living_room[CONF_CLIMATE_MANUAL_OVERRIDE] is True
 
 
 @pytest.mark.asyncio

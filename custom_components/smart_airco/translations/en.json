@@ -1,4 +1,20 @@
 {
+  "entity": {
+    "climate": {
+      "managed_climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "name": "State",
+            "state": {
+              "off": "Off",
+              "on": "On",
+              "solar_based": "Solar based"
+            }
+          }
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -107,4 +123,3 @@
     }
   }
 }
-

@@ -27,6 +27,13 @@ def _build_coordinator_with_data(hass, mock_config_entry) -> SmartAircoCoordinat
                     "can_run": True,
                     "state": "cool",
                     "desired_hvac_mode": "cool",
+                    "supported_hvac_modes": [
+                        "auto",
+                        "heat",
+                        "cool",
+                        "dry",
+                        "fan_only",
+                    ],
                     "target_temperature": 21.0,
                     "current_power": 950,
                     "power_source": "sensor",
@@ -40,6 +47,7 @@ def _build_coordinator_with_data(hass, mock_config_entry) -> SmartAircoCoordinat
                     "can_run": False,
                     "state": "off",
                     "desired_hvac_mode": "cool",
+                    "supported_hvac_modes": ["cool", "heat"],
                     "target_temperature": 20.0,
                     "current_power": 800,
                     "power_source": "estimated",
@@ -138,6 +146,13 @@ def test_running_count_and_system_status_sensors(hass, mock_config_entry) -> Non
     assert attrs["predicted_surplus"] == 1950
     assert attrs["running_entities"] == 1
     assert attrs["managed_climates"][0]["smart_airco_hvac_mode"] == "cool"
+    assert attrs["managed_climates"][0]["supported_hvac_modes"] == [
+        "auto",
+        "heat",
+        "cool",
+        "dry",
+        "fan_only",
+    ]
 
 
 def test_running_count_uses_actual_hvac_state_not_desired_state(
@@ -205,3 +220,18 @@ def test_running_and_power_sensors_follow_heat_mode(hass, mock_config_entry) -> 
     assert power.native_value == 950
     assert power.extra_state_attributes["smart_airco_hvac_mode"] == HVACMode.HEAT
     assert status.native_value == "heating"
+
+
+def test_climate_status_sensor_maps_dry_mode(hass, mock_config_entry) -> None:
+    coordinator = _build_coordinator_with_data(hass, mock_config_entry)
+    coordinator.data["sensors"]["climate_entities"]["climate.living_room"]["state"] = (
+        "dry"
+    )
+    coordinator.data["sensors"]["climate_entities"]["climate.living_room"][
+        "desired_hvac_mode"
+    ] = "dry"
+
+    living_cfg = mock_config_entry.data["climate_entities"][0]
+    status = SmartAircoClimateStatusSensor(coordinator, mock_config_entry, living_cfg)
+
+    assert status.native_value == "drying"

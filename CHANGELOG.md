@@ -134,6 +134,28 @@ version tags for public HACS releases.
 - Restored panel rendering after the `1.0.5` hotfix so the Smart Airco sidebar
   loads cleanly again.
 
+## [1.0.8] - 2026-03-27
+
+### Added
+
+- Dutch translations for Smart Airco mode/state labels in both the managed
+  climate entity and the custom panel.
+
+### Changed
+
+- Managed climates now use each underlying airco's supported non-off HVAC modes
+  instead of limiting Smart Airco to only `heat` and `cool`.
+- The custom panel now labels the Smart Airco preset more clearly as `State` in
+  English and `Mode` in Dutch.
+
+### Fixed
+
+- Manual non-off mode changes such as `auto`, `dry`, and `fan_only` now sync
+  back into Smart Airco correctly when users change an airco outside the
+  integration.
+- Runtime status and panel messaging now describe active run modes beyond just
+  heating and cooling.
+
 ## [1.0.7] - 2026-03-26
 
 ### Changed

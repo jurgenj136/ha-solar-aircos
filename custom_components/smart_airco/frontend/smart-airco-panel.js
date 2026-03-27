@@ -213,6 +213,7 @@ class SmartAircoPanel extends HTMLElement {
       enabled: Boolean(climate.enabled),
       smart_airco_preset_mode: climate.smart_airco_preset_mode || 'solar_based',
       smart_airco_hvac_mode: climate.smart_airco_hvac_mode || 'cool',
+      supported_hvac_modes: [...(climate.supported_hvac_modes || ['cool'])],
       smart_airco_target_temperature:
         climate.smart_airco_target_temperature !== undefined &&
         climate.smart_airco_target_temperature !== null
@@ -367,12 +368,109 @@ class SmartAircoPanel extends HTMLElement {
     return `about ${minutes} minutes`;
   }
 
-  _rawReasonToText(reason) {
-    return String(reason || 'unknown').replaceAll('_', ' ');
+  _language() {
+    return String(
+      this._hass?.locale?.language || this._hass?.language || 'en'
+    ).toLowerCase();
+  }
+
+  _isDutch() {
+    return this._language().startsWith('nl');
+  }
+
+  _modeFieldLabel() {
+    return this._isDutch() ? 'Mode' : 'State';
+  }
+
+  _modeOptionLabel(mode) {
+    if (this._isDutch()) {
+      if (mode === 'on') {
+        return 'Aan';
+      }
+      if (mode === 'off') {
+        return 'Uit';
+      }
+      return 'Zonne-energie';
+    }
+
+    if (mode === 'on') {
+      return 'On';
+    }
+    if (mode === 'off') {
+      return 'Off';
+    }
+    return 'Solar based';
+  }
+
+  _modeHelpText() {
+    if (this._isDutch()) {
+      return 'Uit houdt de airco uit. Aan forceert de airco aan en negeert zonne-energie en raamblokkering. Zonne-energie volgt de normale Smart Airco-regels.';
+    }
+
+    return 'Off keeps the climate off. On forces it on and ignores solar and window blocking. Solar based follows normal Smart Airco rules.';
+  }
+
+  _hvacModeLabel(mode) {
+    const labels = this._isDutch()
+      ? {
+          auto: 'Automatisch',
+          cool: 'Koelen',
+          dry: 'Droog',
+          fan_only: 'Alleen ventilator',
+          heat: 'Verwarmen',
+          heat_cool: 'Verwarmen/koelen',
+        }
+      : {
+          auto: 'Auto',
+          cool: 'Cool',
+          dry: 'Dry',
+          fan_only: 'Fan only',
+          heat: 'Heat',
+          heat_cool: 'Heat/Cool',
+        };
+
+    return labels[mode] || String(mode || 'unknown').replaceAll('_', ' ');
   }
 
   _climateRunModeLabel(mode) {
-    return mode === 'heat' ? 'Heating' : 'Cooling';
+    const labels = this._isDutch()
+      ? {
+          auto: 'automatisch draaien',
+          cool: 'koelen',
+          dry: 'ontvochtigen',
+          fan_only: 'ventileren',
+          heat: 'verwarmen',
+          heat_cool: 'verwarmen/koelen',
+        }
+      : {
+          auto: 'running automatically',
+          cool: 'cooling',
+          dry: 'drying',
+          fan_only: 'ventilating',
+          heat: 'heating',
+          heat_cool: 'heating/cooling',
+        };
+
+    return labels[mode] || this._hvacModeLabel(mode).toLowerCase();
+  }
+
+  _hvacModeOptions(climate, selectedMode) {
+    const modes = Array.isArray(climate.supported_hvac_modes) && climate.supported_hvac_modes.length
+      ? climate.supported_hvac_modes
+      : ['cool'];
+
+    return modes
+      .map((mode) => {
+        const isSelected = mode === selectedMode ? 'selected' : '';
+        return `<option value="${this._escape(mode)}" ${isSelected}>${this._escape(
+          this._hvacModeLabel(mode)
+        )}</option>`;
+      })
+      .join('');
+  }
+
+  _rawReasonToText(reason) {
+    return String(reason || 'unknown').replaceAll('_', ' ');
   }
 
   _formatDecisionReason(climate) {
@@ -395,17 +493,17 @@ class SmartAircoPanel extends HTMLElement {
     }
     if (reason.startsWith('minimum_run_time_remaining_')) {
       const seconds = reason.match(/minimum_run_time_remaining_(\d+)s/)?.[1] || '0';
-      return `Keeping this unit ${this._climateRunModeLabel(climate.smart_airco_hvac_mode).toLowerCase()} for ${this._formatDuration(seconds)}`;
+      return `Keeping this unit ${this._climateRunModeLabel(climate.smart_airco_hvac_mode)} for ${this._formatDuration(seconds)}`;
     }
     if (reason.startsWith('minimum_off_time_remaining_')) {
       const seconds = reason.match(/minimum_off_time_remaining_(\d+)s/)?.[1] || '0';
       return `Waiting ${this._formatDuration(seconds)} before restarting`;
     }
     if (reason.includes('running_with_hysteresis')) {
-      return `${this._climateRunModeLabel(climate.smart_airco_hvac_mode)} remains allowed because surplus is still within the safety margin`;
+      return `${this._hvacModeLabel(climate.smart_airco_hvac_mode)} remains allowed because surplus is still within the safety margin`;
     }
     if (reason.includes('surplus_available_with_hysteresis')) {
-      return `Enough predicted solar surplus is available to start ${this._climateRunModeLabel(climate.smart_airco_hvac_mode).toLowerCase()} this climate`;
+      return `Enough predicted solar surplus is available to start ${this._climateRunModeLabel(climate.smart_airco_hvac_mode)} for this climate`;
     }
     if (reason.startsWith('insufficient_surplus_')) {
       const need = reason.match(/need_(-?\d+)W/)?.[1];
@@ -440,7 +538,7 @@ class SmartAircoPanel extends HTMLElement {
     }
     if (climate.state === climate.smart_airco_hvac_mode) {
       return {
-        label: climate.smart_airco_hvac_mode === 'heat' ? 'Heating' : 'Cooling',
+        label: this._hvacModeLabel(climate.smart_airco_hvac_mode),
         tone: 'ok',
       };
     }
@@ -805,7 +903,7 @@ class SmartAircoPanel extends HTMLElement {
                 climate.smart_airco_preset_mode || 'solar_based'
               )}</strong></div>
               <div><span class="meta-label">Smart Airco mode</span><strong>${this._escape(
-                climate.smart_airco_hvac_mode || 'cool'
+                this._hvacModeLabel(climate.smart_airco_hvac_mode || 'cool')
               )}</strong></div>
               <div><span class="meta-label">Target temperature</span><strong>${this._escape(
                 climate.smart_airco_target_temperature ?? 'Not set'
@@ -843,25 +941,24 @@ class SmartAircoPanel extends HTMLElement {
         <div class="editor-grid">
           <section class="editor-section">
             <h4>Smart Airco behavior</h4>
-            <label for="preset-mode-${this._escape(climate.entity_id)}">Operating mode</label>
+            <label for="preset-mode-${this._escape(climate.entity_id)}">${this._modeFieldLabel()}</label>
             <select
               id="preset-mode-${this._escape(climate.entity_id)}"
               data-climate-field="smart_airco_preset_mode"
               data-climate-id="${this._escape(climate.entity_id)}"
             >
-              <option value="off" ${draft.smart_airco_preset_mode === 'off' ? 'selected' : ''}>Off</option>
-              <option value="on" ${draft.smart_airco_preset_mode === 'on' ? 'selected' : ''}>On</option>
-              <option value="solar_based" ${draft.smart_airco_preset_mode === 'solar_based' ? 'selected' : ''}>Solar based</option>
+              <option value="off" ${draft.smart_airco_preset_mode === 'off' ? 'selected' : ''}>${this._modeOptionLabel('off')}</option>
+              <option value="on" ${draft.smart_airco_preset_mode === 'on' ? 'selected' : ''}>${this._modeOptionLabel('on')}</option>
+              <option value="solar_based" ${draft.smart_airco_preset_mode === 'solar_based' ? 'selected' : ''}>${this._modeOptionLabel('solar_based')}</option>
             </select>
-            <p class="field-help">Off keeps the climate off. On forces it on and ignores solar and window blocking. Solar based follows normal Smart Airco rules.</p>
+            <p class="field-help">${this._modeHelpText()}</p>
             <label for="hvac-mode-${this._escape(climate.entity_id)}">Smart Airco mode</label>
             <select
               id="hvac-mode-${this._escape(climate.entity_id)}"
               data-climate-field="smart_airco_hvac_mode"
               data-climate-id="${this._escape(climate.entity_id)}"
             >
-              <option value="cool" ${draft.smart_airco_hvac_mode === 'cool' ? 'selected' : ''}>Cool</option>
-              <option value="heat" ${draft.smart_airco_hvac_mode === 'heat' ? 'selected' : ''}>Heat</option>
+              ${this._hvacModeOptions(climate, draft.smart_airco_hvac_mode || 'cool')}
             </select>
             <label for="target-temp-${this._escape(climate.entity_id)}">Target temperature</label>
             <input
@@ -1562,6 +1659,11 @@ class SmartAircoPanel extends HTMLElement {
         return;
       }
       const targetTemperature = Number.parseFloat(draft.smart_airco_target_temperature || '');
+      const fallbackMode =
+        draft.supported_hvac_modes?.[0] ||
+        this._viewModel.managedClimates.find((climate) => climate.entity_id === climateId)
+          ?.supported_hvac_modes?.[0] ||
+        'cool';
       await this._runPanelAction(`smart-airco:${climateId}`, async () => {
         await this._hass.callService('climate', 'set_preset_mode', {
           entity_id: smartEntityId,
@@ -1569,7 +1671,7 @@ class SmartAircoPanel extends HTMLElement {
         });
         await this._hass.callService('climate', 'set_hvac_mode', {
           entity_id: smartEntityId,
-          hvac_mode: draft.smart_airco_hvac_mode || 'cool',
+          hvac_mode: draft.smart_airco_hvac_mode || fallbackMode,
         });
         if (Number.isFinite(targetTemperature)) {
           await this._hass.callService('climate', 'set_temperature', {

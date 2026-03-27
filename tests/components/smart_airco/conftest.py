@@ -68,12 +68,20 @@ def seed_states(hass) -> None:
     hass.states.async_set(
         "climate.living_room",
         "off",
-        {"current_temperature": 24.0, "temperature": 21.0},
+        {
+            "current_temperature": 24.0,
+            "temperature": 21.0,
+            "hvac_modes": ["off", "auto", "heat", "cool", "dry", "fan_only"],
+        },
     )
     hass.states.async_set(
         "climate.bedroom",
         "off",
-        {"current_temperature": 23.0, "temperature": 20.0},
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "hvac_modes": ["off", "cool", "heat"],
+        },
     )
     hass.states.async_set("sensor.living_room_power", "950", {"device_class": "power"})
     hass.states.async_set(

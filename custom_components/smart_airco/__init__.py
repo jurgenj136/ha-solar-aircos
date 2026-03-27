@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_CONTROLLER_TARGET_TEMPERATURE,
     PRESET_OFF,
     PRESET_SOLAR_BASED,
+    SMART_AIRCO_HVAC_MODES,
     SERVICE_EVALUATE_CONDITIONS,
     SERVICE_EXECUTE_DECISIONS,
     SERVICE_FORCE_UPDATE,
@@ -125,7 +126,7 @@ SERVICE_REMOVE_CLIMATE_SCHEMA = vol.Schema(
 SERVICE_SET_GLOBAL_SETTINGS_SCHEMA = vol.Schema(
     {
         vol.Optional("config_entry_id"): cv.string,
-        vol.Optional("controller_hvac_mode"): vol.In([HVACMode.COOL, HVACMode.HEAT]),
+        vol.Optional("controller_hvac_mode"): vol.In(SMART_AIRCO_HVAC_MODES),
         vol.Optional("controller_target_temperature"): vol.All(vol.Coerce(float)),
         vol.Optional("forecast_sensor"): vol.Any(None, cv.entity_id),
         vol.Optional("production_sensor"): vol.Any(None, cv.entity_id),
@@ -514,8 +515,8 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             CONF_CLIMATE_PRESET_MODE: (
                 DEFAULT_CLIMATE_PRESET_MODE if data.get("enabled", True) else PRESET_OFF
             ),
-            CONF_CLIMATE_HVAC_MODE: coordinator.config.get(
-                CONF_CONTROLLER_HVAC_MODE, DEFAULT_CLIMATE_HVAC_MODE
+            CONF_CLIMATE_HVAC_MODE: coordinator.climate_hvac_mode(
+                {CONF_CLIMATE_ENTITY_ID: entity_id}
             ),
             CONF_CLIMATE_TARGET_TEMPERATURE: coordinator.config.get(
                 CONF_CONTROLLER_TARGET_TEMPERATURE, DEFAULT_CLIMATE_TARGET_TEMPERATURE

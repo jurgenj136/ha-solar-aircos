@@ -197,7 +197,7 @@ async def test_service_set_global_settings_updates_entry_data(
         DOMAIN,
         "set_global_settings",
         {
-            "controller_hvac_mode": "heat",
+            "controller_hvac_mode": "dry",
             "controller_target_temperature": 22.5,
             "forecast_sensor": None,
             "production_sensor": "sensor.production_alt",
@@ -209,7 +209,7 @@ async def test_service_set_global_settings_updates_entry_data(
     await hass.async_block_till_done()
 
     assert setup_integration.data["solar_forecast_sensor"] is None
-    assert setup_integration.data[CONF_CONTROLLER_HVAC_MODE] == "heat"
+    assert setup_integration.data[CONF_CONTROLLER_HVAC_MODE] == "dry"
     assert setup_integration.data[CONF_CONTROLLER_TARGET_TEMPERATURE] == 22.5
     assert setup_integration.data["solar_production_sensor"] == "sensor.production_alt"
     assert setup_integration.data["update_interval"] == 900

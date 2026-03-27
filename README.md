@@ -138,7 +138,7 @@ Current behavior:
 
 - a manual `on` action switches that Smart Airco climate to `preset_mode = on`,
 - a manual `off` action switches that Smart Airco climate to `preset_mode = off`,
-- manual heat/cool mode and target temperature are copied into the Smart Airco
+- manual run mode and target temperature are copied into the Smart Airco
   climate settings when possible,
 - `solar_based` keeps the normal Smart Airco priority and surplus logic,
 - `on` ignores solar surplus and window/door blocking.
@@ -158,7 +158,7 @@ Exact names depend on your configured climates.
 Each Smart Airco climate entity exposes one of these preset modes:
 
 - `off` - Smart Airco keeps that climate off.
-- `on` - Smart Airco forces that climate on in its configured heat/cool mode and
+- `on` - Smart Airco forces that climate on in its configured run mode and
   target temperature.
 - `solar_based` - Smart Airco only runs that climate when solar surplus logic
   allows it.

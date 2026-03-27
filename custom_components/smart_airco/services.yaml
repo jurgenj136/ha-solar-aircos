@@ -171,12 +171,16 @@ set_global_settings:
   fields:
     controller_hvac_mode:
       name: Controller HVAC Mode
-      description: Optional bulk update for all managed climates to set their Smart Airco heat/cool mode
+      description: Optional bulk update for all managed climates to set their Smart Airco run mode
       selector:
         select:
           options:
+            - auto
             - cool
+            - dry
+            - fan_only
             - heat
+            - heat_cool
     controller_target_temperature:
       name: Controller Target Temperature
       description: Optional bulk update for all managed climates to set their Smart Airco target temperature
