@@ -4,6 +4,7 @@ from __future__ import annotations
 
 # pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
 
+from copy import deepcopy
 import logging
 from typing import Any
 
@@ -286,7 +287,7 @@ class SmartAircoManagedClimateEntity(CoordinatorEntity, ClimateEntity):
         changed = False
 
         for climate_config in self.coordinator.config.get(CONF_CLIMATE_ENTITIES, []):
-            updated = dict(climate_config)
+            updated = deepcopy(climate_config)
             if updated.get(CONF_CLIMATE_ENTITY_ID) == self._source_entity_id:
                 updated.update(updates)
                 changed = True

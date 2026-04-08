@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from time import monotonic
 from unittest.mock import AsyncMock, patch
@@ -415,7 +416,6 @@ def test_update_interval_accepts_seconds_and_timedelta(hass, mock_config_entry) 
 async def test_runtime_reload_updates_coordinator_config(
     hass, setup_integration
 ) -> None:
-    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
     reload_mock = hass.data["smart_airco_test_reload_mock"]
     reload_mock.reset_mock()
 
@@ -528,3 +528,134 @@ async def test_expected_coordinator_state_change_does_not_trigger_manual_overrid
     )
     assert bedroom["enabled"] is True
     assert bedroom.get(CONF_CLIMATE_MANUAL_OVERRIDE, False) is False
+
+
+@pytest.mark.asyncio
+async def test_decision_lock_prevents_concurrent_execution(
+    hass, mock_config_entry, seed_states
+) -> None:
+    """Concurrent async_execute_decisions calls are serialised by the lock."""
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    coordinator.data = {
+        "decisions": {
+            "reason": "running_1_units",
+            "available_surplus": 1500,
+            "total_power_needed": 950,
+            "climate_decisions": {
+                "climate.living_room": {"should_cool": True, "reason": "priority_1"},
+            },
+        },
+        "sensors": {
+            "climate_entities": {
+                "climate.living_room": {
+                    "state": "off",
+                    "name": "Living Room",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": None,
+                },
+            }
+        },
+    }
+
+    call_order: list[str] = []
+
+    original_locked = coordinator._async_execute_decisions_locked
+
+    async def slow_execute() -> None:
+        call_order.append("enter")
+        await original_locked()
+        call_order.append("exit")
+
+    with patch.object(
+        coordinator,
+        "_async_execute_decisions_locked",
+        side_effect=slow_execute,
+    ):
+        task1 = asyncio.create_task(coordinator.async_execute_decisions())
+        task2 = asyncio.create_task(coordinator.async_execute_decisions())
+        await asyncio.gather(task1, task2)
+
+    # Both tasks executed but were serialised (enter/exit pairs don't interleave)
+    assert call_order == ["enter", "exit", "enter", "exit"]
+
+
+@pytest.mark.asyncio
+async def test_execute_decisions_skips_unavailable_entity(
+    hass, mock_config_entry, seed_states
+) -> None:
+    """Climate entities in 'unavailable' state should not receive a turn-off call."""
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    coordinator.data = {
+        "decisions": {
+            "reason": "critical_inputs_invalid",
+            "available_surplus": 0,
+            "total_power_needed": 0,
+            "climate_decisions": {
+                "climate.living_room": {
+                    "should_cool": False,
+                    "reason": "critical_inputs_invalid",
+                },
+            },
+        },
+        "sensors": {
+            "climate_entities": {
+                "climate.living_room": {
+                    "state": "unavailable",
+                    "name": "Living Room",
+                    "desired_hvac_mode": "cool",
+                    "target_temperature": None,
+                },
+            }
+        },
+    }
+
+    with patch.object(
+        coordinator, "async_set_climate_mode", AsyncMock()
+    ) as mock_set_mode:
+        await coordinator.async_execute_decisions()
+
+    mock_set_mode.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sweep_stale_recent_changes_removes_old_entries(
+    hass, mock_config_entry, seed_states
+) -> None:
+    """Entries older than 30 minutes in _recent_hvac_changes are pruned."""
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    coordinator._recent_hvac_changes["climate.living_room"] = (
+        "cool",
+        dt_util.utcnow() - timedelta(minutes=31),
+    )
+    coordinator._recent_hvac_changes["climate.bedroom"] = (
+        "off",
+        dt_util.utcnow() - timedelta(minutes=5),
+    )
+
+    coordinator._sweep_stale_recent_changes()
+
+    assert "climate.living_room" not in coordinator._recent_hvac_changes
+    assert "climate.bedroom" in coordinator._recent_hvac_changes
+
+
+@pytest.mark.asyncio
+async def test_sweep_expired_pending_changes_removes_old_entries(
+    hass, mock_config_entry, seed_states
+) -> None:
+    """Expired entries in _pending_hvac_changes are cleaned up."""
+    coordinator = SmartAircoCoordinator(hass, mock_config_entry)
+    coordinator._pending_hvac_changes["climate.living_room"] = {
+        "expected_state": "cool",
+        "expires_at": monotonic() - 10,
+        "track_for_antichatter": True,
+    }
+    coordinator._pending_hvac_changes["climate.bedroom"] = {
+        "expected_state": "off",
+        "expires_at": monotonic() + 30,
+        "track_for_antichatter": False,
+    }
+
+    coordinator._sweep_expired_pending_changes()
+
+    assert "climate.living_room" not in coordinator._pending_hvac_changes
+    assert "climate.bedroom" in coordinator._pending_hvac_changes

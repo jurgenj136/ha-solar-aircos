@@ -30,7 +30,7 @@ def _sanitize_runtime_data(data: dict[str, Any] | None) -> dict[str, Any] | None
         return None
 
     sanitized = dict(data)
-    sensors = dict(sanitized.get("sensors", {}))
+    sensors = dict(sanitized.get("sensors") or {})
     climate_entities = sensors.get("climate_entities", {})
     if isinstance(climate_entities, dict):
         sensors["climate_entities"] = [
@@ -38,7 +38,7 @@ def _sanitize_runtime_data(data: dict[str, Any] | None) -> dict[str, Any] | None
             for entity_id, climate_data in climate_entities.items()
         ]
 
-    decisions = dict(sanitized.get("decisions", {}))
+    decisions = dict(sanitized.get("decisions") or {})
     climate_decisions = decisions.get("climate_decisions", {})
     if isinstance(climate_decisions, dict):
         decisions["climate_decisions"] = [

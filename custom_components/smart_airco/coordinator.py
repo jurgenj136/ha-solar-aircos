@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import logging
 from datetime import datetime, timedelta
@@ -55,6 +56,7 @@ _LIVE_SENSOR_STALE_MINUTES = 15
 _FORECAST_SENSOR_STALE_HOURS = 12
 _MINIMUM_RUN_TIME = timedelta(minutes=15)
 _MINIMUM_OFF_TIME = timedelta(minutes=10)
+_RECENT_HVAC_CHANGE_MAX_AGE = timedelta(minutes=30)
 _SURPLUS_HYSTERESIS_WATTS = 150
 _MANUAL_OVERRIDE_ATTRIBUTES = {
     "temperature",
@@ -76,6 +78,7 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._pending_hvac_changes: dict[str, dict[str, Any]] = {}
         self._recent_hvac_changes: dict[str, tuple[str, datetime]] = {}
+        self._decision_lock = asyncio.Lock()
 
         # Normalize update_interval (supports timedelta or seconds as int)
         raw_interval = entry.data.get("update_interval", DEFAULT_UPDATE_INTERVAL)
@@ -281,7 +284,9 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             pending["expected_state"] = expected_state
         if expected_temperature is not None:
             pending["expected_temperature"] = expected_temperature
-        pending["track_for_antichatter"] = track_for_antichatter
+        pending["track_for_antichatter"] = track_for_antichatter or pending.get(
+            "track_for_antichatter", False
+        )
         pending["expires_at"] = monotonic() + _EXPECTED_HVAC_CHANGE_TTL_SECONDS
         self._pending_hvac_changes[entity_id] = pending
 
@@ -337,8 +342,32 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
             data={**self.entry.data, CONF_CLIMATE_ENTITIES: climate_entities},
         )
 
+    def _sweep_expired_pending_changes(self) -> None:
+        """Remove pending HVAC change entries that have expired."""
+        now = monotonic()
+        expired = [
+            eid
+            for eid, pending in self._pending_hvac_changes.items()
+            if now > pending.get("expires_at", 0.0)
+        ]
+        for eid in expired:
+            self._pending_hvac_changes.pop(eid, None)
+
+    def _sweep_stale_recent_changes(self) -> None:
+        """Remove recent HVAC change entries older than the max age."""
+        now = dt_util.utcnow()
+        stale = [
+            eid
+            for eid, (_, timestamp) in self._recent_hvac_changes.items()
+            if now - timestamp > _RECENT_HVAC_CHANGE_MAX_AGE
+        ]
+        for eid in stale:
+            self._recent_hvac_changes.pop(eid, None)
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate energy surplus."""
+        self._sweep_expired_pending_changes()
+        self._sweep_stale_recent_changes()
         try:
             data = await self._fetch_sensor_data()
             calculations = self._calculate_energy_data(data)
@@ -929,6 +958,11 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
     async def async_execute_decisions(self) -> None:
         """Execute the airco decisions based on current data."""
+        async with self._decision_lock:
+            await self._async_execute_decisions_locked()
+
+    async def _async_execute_decisions_locked(self) -> None:
+        """Execute decisions while holding the decision lock."""
         if not self.data:
             _LOGGER.warning("No data available for executing decisions")
             return
@@ -1010,7 +1044,11 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 await self.async_set_climate_temperature(
                     entity_id, desired_target_temperature
                 )
-            elif not should_cool and current_state not in ("off", "unknown"):
+            elif not should_cool and current_state not in (
+                "off",
+                "unknown",
+                "unavailable",
+            ):
                 _LOGGER.info(
                     "Turning OFF %s (%s) - %s",
                     climate_name,

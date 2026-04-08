@@ -237,6 +237,53 @@ async def test_refresh_and_execute_services_call_coordinator_methods(
 
 
 @pytest.mark.asyncio
+async def test_find_coordinator_for_climate_no_domain_key(
+    hass, setup_integration
+) -> None:
+    """Service should log an error (not crash) when hass.data has no DOMAIN key."""
+    # Remove all coordinators so DOMAIN key becomes empty, then remove it entirely
+    saved = dict(hass.data.get(DOMAIN, {}))
+    hass.data.pop(DOMAIN, None)
+
+    # Calling set_climate_priority for a non-existent entity when DOMAIN is missing
+    # should gracefully return without raising.
+    await hass.services.async_call(
+        DOMAIN,
+        "set_climate_priority",
+        {"entity_id": "climate.nonexistent", "priority": 1},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # Restore state so fixture teardown can clean up
+    hass.data[DOMAIN] = saved
+
+
+@pytest.mark.asyncio
+async def test_toggle_climate_entity_noop_when_already_same_state(
+    hass, setup_integration
+) -> None:
+    """Toggling to the current enabled state should be a no-op (no config update)."""
+    bedroom = next(
+        c
+        for c in setup_integration.data["climate_entities"]
+        if c["entity_id"] == "climate.bedroom"
+    )
+    original_enabled = bedroom["enabled"]  # True
+
+    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+        await hass.services.async_call(
+            DOMAIN,
+            "toggle_climate_entity",
+            {"entity_id": "climate.bedroom", "enabled": original_enabled},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_add_climate_service_targets_requested_config_entry(
     hass, setup_integration, panel_patches, seed_states
 ) -> None:

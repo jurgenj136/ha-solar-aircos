@@ -12,7 +12,6 @@ from homeassistant.components.climate import (
     ATTR_PRESET_MODE,
     DOMAIN as CLIMATE_DOMAIN,
     HVACAction,
-    HVACMode,
     SERVICE_SET_PRESET_MODE,
 )
 from homeassistant.const import ATTR_ENTITY_ID

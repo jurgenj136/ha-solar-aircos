@@ -85,7 +85,8 @@
       "unknown": "Er is een onverwachte fout opgetreden"
     },
     "abort": {
-      "already_configured": "Smart Airco is al geconfigureerd"
+      "already_configured": "Smart Airco is al geconfigureerd",
+      "managed_via_panel": "Klimaat-entiteiten worden beheerd via het Smart Airco-zijpaneel."
     }
   },
   "options": {
@@ -120,6 +121,9 @@
         "data": {},
         "data_description": {}
       }
+    },
+    "abort": {
+      "managed_via_panel": "Klimaat-entiteiten worden beheerd via het Smart Airco-zijpaneel."
     }
   }
 }

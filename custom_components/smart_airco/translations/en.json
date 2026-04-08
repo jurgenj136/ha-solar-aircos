@@ -85,7 +85,8 @@
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Smart Airco is already configured"
+      "already_configured": "Smart Airco is already configured",
+      "managed_via_panel": "Climate entities are managed via the Smart Airco sidebar panel."
     }
   },
   "options": {
@@ -120,6 +121,9 @@
         "data": {},
         "data_description": {}
       }
+    },
+    "abort": {
+      "managed_via_panel": "Climate entities are managed via the Smart Airco sidebar panel."
     }
   }
 }

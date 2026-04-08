@@ -9,7 +9,6 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.components.climate.const import HVACMode
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
@@ -27,7 +26,6 @@ from .const import (
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_PRIORITY,
     DOMAIN,
-    DEFAULT_CLIMATE_HVAC_MODE,
     DEFAULT_CLIMATE_PRESET_MODE,
     DEFAULT_CLIMATE_TARGET_TEMPERATURE,
     DEFAULT_CONTROLLER_HVAC_MODE,
@@ -304,7 +302,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 if coordinator is not None
             ]
         else:
-            coordinators = list(hass.data[DOMAIN].values())
+            coordinators = list(hass.data.get(DOMAIN, {}).values())
 
         for coordinator in coordinators:
             climate_entities = deepcopy(
@@ -332,7 +330,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 if coordinator is not None
             ]
         else:
-            coordinators = list(hass.data[DOMAIN].values())
+            coordinators = list(hass.data.get(DOMAIN, {}).values())
 
         for coordinator in coordinators:
             await coordinator.async_request_refresh()
@@ -350,7 +348,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 if coordinator is not None
             ]
         else:
-            coordinators = list(hass.data[DOMAIN].values())
+            coordinators = list(hass.data.get(DOMAIN, {}).values())
 
         for coordinator in coordinators:
             await coordinator.async_request_refresh()
@@ -365,7 +363,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 if coordinator is not None
             ]
         else:
-            coordinators = list(hass.data[DOMAIN].values())
+            coordinators = list(hass.data.get(DOMAIN, {}).values())
 
         for coordinator in coordinators:
             await coordinator.async_execute_decisions()
@@ -425,6 +423,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             return
 
         old_enabled = climate_entities[climate_index].get(CONF_CLIMATE_ENABLED, True)
+        if old_enabled == enabled:
+            return
+
         climate_entities[climate_index][CONF_CLIMATE_ENABLED] = enabled
         climate_entities[climate_index][CONF_CLIMATE_PRESET_MODE] = (
             PRESET_SOLAR_BASED if enabled else PRESET_OFF
@@ -442,8 +443,6 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             "Enabled" if enabled else "Disabled",
             entity_id,
         )
-        if old_enabled == enabled:
-            return
 
     async def handle_set_climate_power(call: ServiceCall) -> None:
         """Handle updating per-AC power settings."""
