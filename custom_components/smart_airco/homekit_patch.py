@@ -251,6 +251,11 @@ def _should_present_thermostat_as_off(state: State | None) -> bool:
     if state is None or not _is_solar_automation_enabled(state):
         return False
 
+    # If the coordinator has decided this AC should run, don't override to off
+    # even if the underlying AC hasn't physically switched on yet.
+    if state.attributes.get("should_run", False):
+        return False
+
     hvac_action = state.attributes.get(ATTR_HVAC_ACTION)
     return hvac_action in (HVACAction.OFF, HVACAction.IDLE)
 

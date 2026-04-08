@@ -176,6 +176,26 @@ def test_homekit_patch_adds_linked_solar_switch(hass, monkeypatch) -> None:
     assert accessory.calls[2][2]["preset_mode"] == PRESET_ON
     assert accessory.calls[3][2]["preset_mode"] == PRESET_SOLAR_BASED
 
+    # Transition: solar automation enabled, coordinator decided should_run=True,
+    # but underlying AC hasn't physically switched on yet (hvac_action=IDLE).
+    # HomeKit must NOT override the thermostat to off in this case.
+    hass.states.async_set(
+        entity_id,
+        "cool",
+        {
+            ATTR_SMART_AIRCO_MANAGED: True,
+            ATTR_SMART_AIRCO_PRESET_MODE: PRESET_SOLAR_BASED,
+            ATTR_SMART_AIRCO_SOLAR_AUTOMATION_ENABLED: True,
+            ATTR_HVAC_ACTION: HVACAction.IDLE,
+            "should_run": True,
+        },
+    )
+    accessory.async_update_state(hass.states.get(entity_id))
+    # Target should reflect desired COOL mode, not be forced to off.
+    # Current remains 0 (idle) because the physical AC hasn't started yet,
+    # but the important thing is that target is not overridden to off.
+    assert accessory.char_target_heat_cool.value != 0
+
     async_release_homekit_patch(hass)
     assert accessories_module.TYPES["Thermostat"] is _FakeThermostat
     assert thermostats_module.Thermostat is _FakeThermostat
