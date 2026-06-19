@@ -225,26 +225,44 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
 
     @callback
     def _consume_expected_hvac_change(self, entity_id: str, new_state: State) -> bool:
-        """Return True if the state change matches a recent coordinator command."""
+        """Return True if a state change is explained by a recent coordinator command.
+
+        A single coordinator command (e.g. ``set_hvac_mode``) usually produces
+        more than one state-change event: the mode flip itself, followed by
+        trailing attribute churn as the device settles (fan mode, target
+        temperature or preset resets). The expectation is therefore kept alive
+        for the whole settling window and every event that stays consistent with
+        the command is suppressed, instead of only the first matching event.
+        Otherwise a follow-up echo is misread as a manual override and the
+        automation disables itself.
+        """
         pending = self._pending_hvac_changes.get(entity_id)
         if pending is None:
             return False
 
-        expires_at = pending.get("expires_at", 0.0)
-        if monotonic() > expires_at:
+        if monotonic() > pending.get("expires_at", 0.0):
             self._pending_hvac_changes.pop(entity_id, None)
             return False
 
-        matched = False
         expected_state = pending.get("expected_state")
-        if expected_state is not None and new_state.state == expected_state:
-            matched = True
-            pending.pop("expected_state", None)
-            if pending.get("track_for_antichatter", False):
+        if expected_state is not None:
+            if new_state.state != expected_state:
+                # The mode diverged from what we commanded: treat it as a
+                # genuine manual change and stop suppressing.
+                self._pending_hvac_changes.pop(entity_id, None)
+                return False
+
+            # Record the anti-chatter timestamp once, when the commanded state is
+            # first observed, so trailing echoes do not keep pushing it forward.
+            if pending.get("track_for_antichatter") and not pending.get(
+                "antichatter_recorded"
+            ):
                 self._recent_hvac_changes[entity_id] = (
                     new_state.state,
                     dt_util.utcnow(),
                 )
+                pending["antichatter_recorded"] = True
+            return True
 
         expected_temperature = pending.get("expected_temperature")
         if expected_temperature is not None:
@@ -257,18 +275,9 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
                 current_temperature is not None
                 and abs(current_temperature - float(expected_temperature)) < 0.25
             ):
-                matched = True
-                pending.pop("expected_temperature", None)
+                return True
 
-        if (
-            not pending.get("expected_state")
-            and pending.get("expected_temperature") is None
-        ):
-            self._pending_hvac_changes.pop(entity_id, None)
-        else:
-            self._pending_hvac_changes[entity_id] = pending
-
-        return matched
+        return False
 
     def _remember_expected_climate_change(
         self,
@@ -282,6 +291,9 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         pending = self._pending_hvac_changes.get(entity_id, {})
         if expected_state is not None:
             pending["expected_state"] = expected_state
+            # A freshly commanded state must record its own anti-chatter
+            # timestamp the next time it is observed.
+            pending["antichatter_recorded"] = False
         if expected_temperature is not None:
             pending["expected_temperature"] = expected_temperature
         pending["track_for_antichatter"] = track_for_antichatter or pending.get(

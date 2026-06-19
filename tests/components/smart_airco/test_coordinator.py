@@ -531,6 +531,113 @@ async def test_expected_coordinator_state_change_does_not_trigger_manual_overrid
 
 
 @pytest.mark.asyncio
+async def test_device_echo_after_coordinator_turn_off_keeps_automation(
+    hass, setup_integration
+) -> None:
+    """Trailing device attribute churn after a coordinator turn-off must not be
+    misread as a manual override and disable the automation."""
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+
+    # AC is cooling under solar control (modelled as coordinator-driven so the
+    # baseline itself is not seen as a manual override).
+    coordinator._remember_expected_climate_change(
+        "climate.bedroom", expected_state="cool", track_for_antichatter=False
+    )
+    hass.states.async_set(
+        "climate.bedroom",
+        "cool",
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "fan_mode": "high",
+            "hvac_modes": ["off", "cool", "heat"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    # Coordinator turns it off because solar surplus dropped.
+    coordinator._remember_expected_climate_change(
+        "climate.bedroom", expected_state="off", track_for_antichatter=True
+    )
+    hass.states.async_set(
+        "climate.bedroom",
+        "off",
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "fan_mode": "high",
+            "hvac_modes": ["off", "cool", "heat"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    # The unit emits a follow-up event while staying off (e.g. the fan resets).
+    hass.states.async_set(
+        "climate.bedroom",
+        "off",
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "fan_mode": "auto",
+            "hvac_modes": ["off", "cool", "heat"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    bedroom = next(
+        c
+        for c in setup_integration.data["climate_entities"]
+        if c["entity_id"] == "climate.bedroom"
+    )
+    assert bedroom[CONF_CLIMATE_PRESET_MODE] == PRESET_SOLAR_BASED
+    assert bedroom.get(CONF_CLIMATE_MANUAL_OVERRIDE, False) is False
+    assert bedroom["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_manual_mode_change_after_coordinator_command_still_detected(
+    hass, setup_integration
+) -> None:
+    """A genuine manual mode change that diverges from the coordinator command is
+    still detected even while the expected-change window is open."""
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+
+    coordinator._remember_expected_climate_change(
+        "climate.bedroom", expected_state="cool", track_for_antichatter=True
+    )
+    hass.states.async_set(
+        "climate.bedroom",
+        "cool",
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "hvac_modes": ["off", "cool", "heat"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    # User switches the unit off on the remote while the expectation is still live.
+    hass.states.async_set(
+        "climate.bedroom",
+        "off",
+        {
+            "current_temperature": 23.0,
+            "temperature": 20.0,
+            "hvac_modes": ["off", "cool", "heat"],
+        },
+    )
+    await hass.async_block_till_done()
+
+    bedroom = next(
+        c
+        for c in setup_integration.data["climate_entities"]
+        if c["entity_id"] == "climate.bedroom"
+    )
+    assert bedroom[CONF_CLIMATE_PRESET_MODE] == PRESET_OFF
+    assert bedroom[CONF_CLIMATE_MANUAL_OVERRIDE] is True
+
+
+@pytest.mark.asyncio
 async def test_decision_lock_prevents_concurrent_execution(
     hass, mock_config_entry, seed_states
 ) -> None:
