@@ -15,7 +15,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          # Home Assistant 2026.6+ requires Python >=3.14.2; on 3.13 the test
+          # harness silently backtracks to a year-old HA, so validation must
+          # run on 3.14 to exercise current Home Assistant.
+          python-version: '3.14'
 
       - name: Install test dependencies
         run: |
