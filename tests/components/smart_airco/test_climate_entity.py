@@ -132,6 +132,47 @@ def test_solar_based_climate_presents_as_off_when_decision_denies_running(
 
 
 @pytest.mark.asyncio
+async def test_enabling_solar_reflects_fresh_decision_immediately(
+    hass, setup_integration
+) -> None:
+    """Enabling solar (e.g. from HomeKit) must reflect the freshly evaluated
+    decision immediately, not a stale one captured before the change."""
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+    setup_integration.data[CONF_CLIMATE_ENTITIES][0][CONF_CLIMATE_PRESET_MODE] = (
+        PRESET_OFF
+    )
+    setup_integration.data[CONF_CLIMATE_ENTITIES][0][CONF_CLIMATE_ENABLED] = False
+    entity = _entity(coordinator, setup_integration, 0)
+
+    # Stale decision from before the change: the AC is considered "not running".
+    coordinator.data = {
+        "sensors": {
+            "climate_entities": {
+                "climate.living_room": {
+                    "state": HVACMode.OFF,
+                    "desired_hvac_mode": HVACMode.COOL,
+                }
+            }
+        },
+        "decisions": {
+            "climate_decisions": {
+                "climate.living_room": {"should_cool": False, "reason": "off"}
+            }
+        },
+    }
+
+    # User flips the HomeKit "Solar" switch on -> set_preset_mode(solar_based).
+    with patch.object(entity, "async_write_ha_state"):
+        await entity.async_set_preset_mode(PRESET_SOLAR_BASED)
+
+    # Seeded sensors leave ~2000W surplus, enough for the 950W living-room AC,
+    # so the freshly evaluated decision is should_cool=True. The entity must
+    # already reflect that the moment the call returns (what HomeKit reads).
+    assert entity.extra_state_attributes["should_run"] is True
+    assert entity.hvac_mode == HVACMode.COOL
+
+
+@pytest.mark.asyncio
 async def test_set_hvac_mode_updates_per_climate_preferences(
     hass, setup_integration
 ) -> None:
@@ -146,7 +187,7 @@ async def test_set_hvac_mode_updates_per_climate_preferences(
 
     updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
     assert updated[CONF_CLIMATE_HVAC_MODE] == HVACMode.HEAT
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -164,7 +205,7 @@ async def test_set_hvac_mode_accepts_supported_non_off_modes(
 
     updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
     assert updated[CONF_CLIMATE_HVAC_MODE] == HVACMode.DRY
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -198,7 +239,7 @@ async def test_set_hvac_mode_turns_on_entity_when_preset_was_off(
         "climate.living_room", HVACMode.HEAT, track_for_antichatter=False
     )
     mock_set_temp.assert_awaited_once_with("climate.living_room", 21.0)
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -224,7 +265,7 @@ async def test_turn_off_sets_preset_off_and_turns_off_underlying_climate(
     mock_set_mode.assert_awaited_once_with(
         "climate.living_room", HVACMode.OFF, track_for_antichatter=False
     )
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -252,7 +293,7 @@ async def test_turn_on_sets_preset_on_and_uses_desired_settings(
         "climate.living_room", HVACMode.COOL, track_for_antichatter=False
     )
     mock_set_temp.assert_awaited_once_with("climate.living_room", 21.0)
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -282,7 +323,7 @@ async def test_set_temperature_updates_running_climate(hass, setup_integration) 
     updated = setup_integration.data[CONF_CLIMATE_ENTITIES][0]
     assert updated[CONF_CLIMATE_TARGET_TEMPERATURE] == 22.5
     mock_set_temp.assert_awaited_once_with("climate.living_room", 22.5)
-    mock_refresh.assert_awaited_once()
+    mock_refresh.assert_awaited()
 
 
 def test_extra_state_attributes_expose_smart_airco_fields(

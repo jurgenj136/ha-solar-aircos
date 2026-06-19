@@ -141,7 +141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Airco from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     register_panel = not hass.data[DOMAIN]
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    entry.async_on_unload(entry.add_update_listener(_async_handle_entry_update))
 
     entry = await _async_migrate_entry_data(hass, entry)
     async_acquire_homekit_patch(hass)
@@ -186,9 +186,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload an entry after config changes."""
-    await hass.config_entries.async_reload(entry.entry_id)
+async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Apply a config-entry change with the lightest sufficient action.
+
+    Per-climate values (preset, mode, target temperature, priority, power,
+    windows, manual override) and the configured sensors are read live by the
+    coordinator, so they only need a refresh. Reloading the whole entry for
+    those churns every managed entity — which makes HomeKit briefly drop the
+    accessory and resets the anti-chatter timers. Only structural changes (the
+    set of managed climates or the polling interval) require a full reload.
+    """
+    coordinator: SmartAircoCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is None:
+        return
+    if coordinator.needs_reload_for(entry.data):
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+    await coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

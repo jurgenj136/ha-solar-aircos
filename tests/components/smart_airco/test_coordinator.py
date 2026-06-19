@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from datetime import timedelta
 from time import monotonic
 from unittest.mock import AsyncMock, patch
@@ -9,6 +10,7 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.smart_airco.const import (
+    CONF_CLIMATE_ENTITIES,
     CONF_CLIMATE_HVAC_MODE,
     CONF_CLIMATE_MANUAL_OVERRIDE,
     CONF_CLIMATE_PRESET_MODE,
@@ -432,10 +434,62 @@ async def test_runtime_reload_updates_coordinator_config(
 
 
 @pytest.mark.asyncio
+async def test_in_place_climate_change_refreshes_without_reload(
+    hass, setup_integration
+) -> None:
+    """A per-climate value change is applied via refresh, never a full reload."""
+    coordinator: SmartAircoCoordinator = hass.data[DOMAIN][setup_integration.entry_id]
+    reload_mock = hass.data["smart_airco_test_reload_mock"]
+    reload_mock.reset_mock()
+
+    with patch.object(
+        coordinator, "async_request_refresh", AsyncMock()
+    ) as mock_refresh:
+        climates = deepcopy(setup_integration.data[CONF_CLIMATE_ENTITIES])
+        climates[0][CONF_CLIMATE_PRESET_MODE] = PRESET_ON
+        hass.config_entries.async_update_entry(
+            setup_integration,
+            data={**setup_integration.data, CONF_CLIMATE_ENTITIES: climates},
+        )
+        await hass.async_block_till_done()
+
+    reload_mock.assert_not_called()
+    mock_refresh.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_structural_climate_change_triggers_reload(
+    hass, setup_integration
+) -> None:
+    """Adding or removing a managed climate requires a full reload."""
+    reload_mock = hass.data["smart_airco_test_reload_mock"]
+    reload_mock.reset_mock()
+
+    climates = deepcopy(setup_integration.data[CONF_CLIMATE_ENTITIES])
+    climates.append(
+        {
+            "entity_id": "climate.office",
+            "name": "Office",
+            "priority": 3,
+            "preset_mode": PRESET_SOLAR_BASED,
+            "enabled": True,
+        }
+    )
+    hass.config_entries.async_update_entry(
+        setup_integration,
+        data={**setup_integration.data, CONF_CLIMATE_ENTITIES: climates},
+    )
+    await hass.async_block_till_done()
+
+    reload_mock.assert_awaited_once_with(setup_integration.entry_id)
+
+
+@pytest.mark.asyncio
 async def test_manual_override_disables_automation_for_changed_ac(
     hass, setup_integration
 ) -> None:
     reload_mock = hass.data["smart_airco_test_reload_mock"]
+    reload_mock.reset_mock()
 
     hass.states.async_set(
         "climate.bedroom",
@@ -453,7 +507,9 @@ async def test_manual_override_disables_automation_for_changed_ac(
     assert bedroom[CONF_CLIMATE_PRESET_MODE] == PRESET_ON
     assert bedroom[CONF_CLIMATE_HVAC_MODE] == "cool"
     assert bedroom[CONF_CLIMATE_MANUAL_OVERRIDE] is True
-    reload_mock.assert_awaited_with(setup_integration.entry_id)
+    # A manual override is an in-place change: it must be applied without a full
+    # integration reload (which would churn HomeKit and reset anti-chatter).
+    reload_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

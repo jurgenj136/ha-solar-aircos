@@ -55,7 +55,9 @@ async def test_service_toggle_climate_entity_disables_and_turns_off_ac(
         if c["entity_id"] == "climate.bedroom"
     )
     assert bedroom["enabled"] is False
-    mock_set_mode.assert_awaited_once_with(
+    # Disabling turns the AC off. An in-place refresh now also re-evaluates the
+    # other managed climates, so assert this specific call rather than the only.
+    mock_set_mode.assert_any_await(
         "climate.bedroom",
         "off",
         track_for_antichatter=False,

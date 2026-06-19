@@ -79,22 +79,54 @@ class SmartAircoCoordinator(DataUpdateCoordinator):
         self._pending_hvac_changes: dict[str, dict[str, Any]] = {}
         self._recent_hvac_changes: dict[str, tuple[str, datetime]] = {}
         self._decision_lock = asyncio.Lock()
-
-        # Normalize update_interval (supports timedelta or seconds as int)
-        raw_interval = entry.data.get("update_interval", DEFAULT_UPDATE_INTERVAL)
-        if isinstance(raw_interval, (int, float)):
-            normalized_interval = timedelta(seconds=int(raw_interval))
-        elif isinstance(raw_interval, timedelta):
-            normalized_interval = raw_interval
-        else:
-            normalized_interval = DEFAULT_UPDATE_INTERVAL
+        # Config whose change requires a full reload rather than an in-place
+        # refresh (see needs_reload_for).
+        self._structural_signature = self._compute_structural_signature(entry.data)
 
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=normalized_interval,
+            update_interval=self._normalize_update_interval(
+                entry.data.get("update_interval", DEFAULT_UPDATE_INTERVAL)
+            ),
         )
+
+    @staticmethod
+    def _normalize_update_interval(raw: Any) -> timedelta:
+        """Normalize a configured update interval (seconds int or timedelta)."""
+        if isinstance(raw, (int, float)):
+            return timedelta(seconds=int(raw))
+        if isinstance(raw, timedelta):
+            return raw
+        return DEFAULT_UPDATE_INTERVAL
+
+    @staticmethod
+    def _compute_structural_signature(data: Mapping[str, Any]) -> tuple[Any, ...]:
+        """Return config parts whose change requires a full integration reload.
+
+        Every other setting (per-climate preset/mode/temperature/priority/power/
+        windows/manual override and the configured sensors) is read live by the
+        coordinator and entities, so only the set of managed climates and the
+        polling interval — which recreate entities and the coordinator — need a
+        reload.
+        """
+        entity_ids = tuple(
+            sorted(
+                climate[CONF_CLIMATE_ENTITY_ID]
+                for climate in data.get(CONF_CLIMATE_ENTITIES, [])
+                if isinstance(climate, dict)
+                and isinstance(climate.get(CONF_CLIMATE_ENTITY_ID), str)
+            )
+        )
+        interval = SmartAircoCoordinator._normalize_update_interval(
+            data.get("update_interval", DEFAULT_UPDATE_INTERVAL)
+        )
+        return (interval, entity_ids)
+
+    def needs_reload_for(self, data: Mapping[str, Any]) -> bool:
+        """Return True if applying ``data`` requires a full integration reload."""
+        return self._compute_structural_signature(data) != self._structural_signature
 
     @property
     def config(self) -> Mapping[str, Any]:
